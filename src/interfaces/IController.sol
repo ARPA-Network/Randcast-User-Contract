@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.8.0;
-import "./RequestTypeBase.sol";
+pragma solidity >=0.8.10;
+
+import "../RequestTypeBase.sol";
 
 interface IController is RequestTypeBase {
     struct PartialSignature {
@@ -20,7 +21,9 @@ interface IController is RequestTypeBase {
     function requestRandomness(
         RequestType requestType,
         bytes memory params,
-        uint256 seed
+        uint256 seed,
+        uint16 requestConfirmations,
+        uint256 callbackGasLimit
     ) external returns (bytes32);
 
     function fulfillRandomness(
