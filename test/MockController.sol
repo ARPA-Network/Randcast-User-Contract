@@ -2,36 +2,32 @@
 pragma solidity >=0.8.10;
 
 import "forge-std/Test.sol";
-import "../src/IController.sol";
-import "../src/RandcastConsumerBase.sol";
+import "../src/interfaces/IController.sol";
+import "../src/BasicRandcastConsumerBase.sol";
+import "../src/RequestIdBase.sol";
+import "../src/utils/RandomnessHandler.sol";
 
-contract MockController is IController, Test {
+contract MockController is IController, RequestIdBase, RandomnessHandler, Test {
     mapping(address => uint256) public nonces;
+    // TODO only record the hash of the callback params to save storage gas
     struct Callback {
         address callbackContract;
         RequestType requestType;
         bytes params;
-        bytes32 seedAndBlockNum;
+        uint256 seed;
+        uint256 blockNum;
+        uint16 requestConfirmations;
+        uint256 callbackGasLimit;
     }
 
     mapping(bytes32 => Callback) public callbacks;
 
-    function makeRandcastInputSeed(
-        uint256 _userSeed,
-        address _requester,
-        uint256 _nonce
-    ) internal pure returns (uint256) {
-        return uint256(keccak256(abi.encode(_userSeed, _requester, _nonce)));
-    }
-
-    function makeRequestId(uint256 inputSeed) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(inputSeed));
-    }
-
     function requestRandomness(
         RequestType requestType,
         bytes memory params,
-        uint256 seed
+        uint256 seed,
+        uint16 requestConfirmations,
+        uint256 callbackGasLimit
     ) external returns (bytes32) {
         uint256 rawSeed = makeRandcastInputSeed(
             seed,
@@ -45,10 +41,13 @@ contract MockController is IController, Test {
         callbacks[requestId].callbackContract = msg.sender;
         callbacks[requestId].requestType = requestType;
         callbacks[requestId].params = params;
-        callbacks[requestId].seedAndBlockNum = keccak256(
-            abi.encodePacked(rawSeed, block.number)
-        );
+        callbacks[requestId].seed = rawSeed;
+        callbacks[requestId].blockNum = block.number;
+        callbacks[requestId].requestConfirmations = requestConfirmations;
+        callbacks[requestId].callbackGasLimit = callbackGasLimit;
 
+        // mock confirmation times
+        vm.roll(block.number + requestConfirmations);
         // mock strategy of task assignment(group_index)
         emit RandomnessRequest(seed, 0, requestId, msg.sender);
         // mock fulfillRandomness directly
@@ -77,7 +76,13 @@ contract MockController is IController, Test {
         uint256 randomness = uint256(keccak256(abi.encode(signature)));
 
         Callback memory callback = callbacks[requestId];
-        RandcastConsumerBase b;
+
+        require(
+            block.number >= callback.blockNum + callback.requestConfirmations,
+            "Too early to fulfill"
+        );
+
+        BasicRandcastConsumerBase b;
         bytes memory resp;
         if (callback.requestType == RequestType.Randomness) {
             resp = abi.encodeWithSelector(
@@ -106,34 +111,14 @@ contract MockController is IController, Test {
             );
         }
 
-        (bool success, ) = callback.callbackContract.call(resp);
+        delete callbacks[requestId];
+
+        (bool success, ) = callback.callbackContract.call{
+            gas: callback.callbackGasLimit
+        }(resp);
 
         (success);
 
         emit RandomnessRequestFulfilled(requestId, randomness);
-    }
-
-    function shuffle(uint256 upper, uint256 randomness)
-        internal
-        pure
-        returns (uint256[] memory)
-    {
-        uint256[] memory arr = new uint256[](upper);
-        for (uint256 k = 0; k < upper; k++) {
-            arr[k] = k;
-        }
-        uint256 i = arr.length;
-        uint256 j;
-        uint256 t;
-
-        while (--i > 0) {
-            j = randomness % i;
-            randomness = uint256(keccak256(abi.encode(randomness)));
-            t = arr[i];
-            arr[i] = arr[j];
-            arr[j] = t;
-        }
-
-        return arr;
     }
 }
