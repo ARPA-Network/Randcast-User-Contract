@@ -1,30 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.10;
 
-import "./RandcastConsumerBase.sol";
+import "../GeneralRandcastConsumerBase.sol";
 
-contract RollDiceExample is RandcastConsumerBase {
+contract RollDiceExample is GeneralRandcastConsumerBase {
     /* requestId -> randomness */
     mapping(bytes32 => uint256[]) public randomResults;
     uint256[] public diceResults;
 
     constructor(address controller, address arpa)
-        RandcastConsumerBase(controller, arpa)
+        BasicRandcastConsumerBase(controller, arpa)
     {}
 
     /**
      * Requests randomness
      */
-    function rollDice(uint256 seed, uint32 bunch)
-        public
-        returns (bytes32 requestId)
-    {
+    function rollDice(uint32 bunch) external {
         require(
             arpa.balanceOf(address(this)) >= requestFee,
             "Not enough ARPA - fill contract with faucet"
         );
         bytes memory params = abi.encode(bunch);
-        return requestRandomness(RequestType.RandomWords, params, seed);
+        requestRandomness(RequestType.RandomWords, params);
     }
 
     /**
