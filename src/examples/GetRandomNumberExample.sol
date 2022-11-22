@@ -8,20 +8,14 @@ contract GetRandomNumberExample is GeneralRandcastConsumerBase {
     mapping(bytes32 => uint256) public randomResults;
     uint256[] public randomnessResults;
 
-    constructor(address controller, address arpa)
-        BasicRandcastConsumerBase(controller, arpa)
-    {}
+    constructor(address controller) BasicRandcastConsumerBase(controller) {}
 
     /**
      * Requests randomness
      */
-    function getRandomNumber() external {
-        require(
-            arpa.balanceOf(address(this)) >= requestFee,
-            "Not enough ARPA - fill contract with faucet"
-        );
+    function getRandomNumber() external returns (bytes32) {
         bytes memory params;
-        requestRandomness(RequestType.Randomness, params);
+        return requestRandomness(RequestType.Randomness, params);
     }
 
     /**

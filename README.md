@@ -21,5 +21,5 @@ forge build
 3. Run tests:
 
 ```bash
-forge test -vv
+forge test --gas-price 1000000000 -vv
 ```

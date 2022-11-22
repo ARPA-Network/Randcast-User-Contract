@@ -8,20 +8,14 @@ contract GetShuffledArrayExample is GeneralRandcastConsumerBase {
     mapping(bytes32 => uint256[]) public randomResults;
     uint256[] public shuffleResults;
 
-    constructor(address controller, address arpa)
-        BasicRandcastConsumerBase(controller, arpa)
-    {}
+    constructor(address controller) BasicRandcastConsumerBase(controller) {}
 
     /**
      * Requests randomness
      */
-    function getShuffledArray(uint32 upper) external {
-        require(
-            arpa.balanceOf(address(this)) >= requestFee,
-            "Not enough ARPA - fill contract with faucet"
-        );
+    function getShuffledArray(uint32 upper) external returns (bytes32) {
         bytes memory params = abi.encode(upper);
-        requestRandomness(RequestType.Shuffling, params);
+        return requestRandomness(RequestType.Shuffling, params);
     }
 
     /**

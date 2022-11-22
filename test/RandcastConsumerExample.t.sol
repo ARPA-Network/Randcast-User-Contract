@@ -1,47 +1,72 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity >=0.8.10;
 
-import "forge-std/Test.sol";
 import "../src/examples/GetRandomNumberExample.sol";
 import "../src/examples/GetShuffledArrayExample.sol";
 import "../src/examples/RollDiceExample.sol";
 import "../src/examples/AdvancedGetShuffledArrayExample.sol";
-import "../src/interfaces/IController.sol";
-import "./MockController.sol";
-import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
+import "./RandcastTestHelper.sol";
 
-contract RandcastConsumerExampleTest is Test {
+contract RandcastConsumerExampleTest is RandcastTestHelper {
     GetRandomNumberExample getRandomNumberExample;
     GetShuffledArrayExample getShuffledArrayExample;
     RollDiceExample rollDiceExample;
     AdvancedGetShuffledArrayExample advancedGetShuffledArrayExample;
-    MockController mockController;
-    IERC20 arpa;
-
-    address public admin = address(0xABCD);
-    address public user = address(0x11);
-    address public node = address(0x22);
 
     function setUp() public {
+        skip(1000);
         changePrank(admin);
         arpa = new ERC20("arpa token", "ARPA");
-        mockController = new MockController();
+        oracle = new MockOracle();
+        mockController = new MockController(address(arpa), address(oracle));
         getRandomNumberExample = new GetRandomNumberExample(
-            address(mockController),
-            address(arpa)
+            address(mockController)
         );
-        rollDiceExample = new RollDiceExample(
-            address(mockController),
-            address(arpa)
-        );
+        rollDiceExample = new RollDiceExample(address(mockController));
         getShuffledArrayExample = new GetShuffledArrayExample(
-            address(mockController),
-            address(arpa)
+            address(mockController)
         );
         advancedGetShuffledArrayExample = new AdvancedGetShuffledArrayExample(
-            address(mockController),
-            address(arpa)
+            address(mockController)
+        );
+
+        uint16 minimumRequestConfirmations = 3;
+        uint32 maxGasLimit = 2000000;
+        uint32 stalenessSeconds = 30;
+        uint32 gasAfterPaymentCalculation = 30000;
+        uint32 gasExceptCallback = 200000;
+        int256 fallbackWeiPerUnitArpa = 1e12;
+        mockController.setConfig(
+            minimumRequestConfirmations,
+            maxGasLimit,
+            stalenessSeconds,
+            gasAfterPaymentCalculation,
+            gasExceptCallback,
+            fallbackWeiPerUnitArpa,
+            MockController.FeeConfig(
+                250000,
+                250000,
+                250000,
+                250000,
+                250000,
+                0,
+                0,
+                0,
+                0
+            )
+        );
+
+        uint96 plentyOfArpaBalance = 1e6 * 1e18;
+        deal(address(arpa), address(admin), 3 * plentyOfArpaBalance);
+        arpa.approve(address(mockController), 3 * plentyOfArpaBalance);
+        prepareSubscription(
+            address(getRandomNumberExample),
+            plentyOfArpaBalance
+        );
+        prepareSubscription(address(rollDiceExample), plentyOfArpaBalance);
+        prepareSubscription(
+            address(getShuffledArrayExample),
+            plentyOfArpaBalance
         );
     }
 
@@ -53,14 +78,18 @@ contract RandcastConsumerExampleTest is Test {
     }
 
     function testGetRandomNumber() public {
-        changePrank(admin);
-        deal(user, 1 * 10**18);
-        deal(address(arpa), address(getRandomNumberExample), 2000 * 10**18);
+        deal(user, 1 * 1e18);
         changePrank(user);
 
         uint32 times = 10;
         for (uint256 i = 0; i < times; i++) {
-            getRandomNumberExample.getRandomNumber();
+            bytes32 requestId = getRandomNumberExample.getRandomNumber();
+
+            deal(node, 1 * 1e18);
+            changePrank(node);
+            fulfillRequest(requestId);
+
+            changePrank(user);
             vm.roll(block.number + 1);
         }
 
@@ -75,13 +104,17 @@ contract RandcastConsumerExampleTest is Test {
     }
 
     function testRollDice() public {
-        changePrank(admin);
-        deal(user, 1 * 10**18);
-        deal(address(arpa), address(rollDiceExample), 200 * 10**18);
+        deal(user, 1 * 1e18);
         changePrank(user);
 
         uint32 bunch = 10;
-        rollDiceExample.rollDice(bunch);
+        bytes32 requestId = rollDiceExample.rollDice(bunch);
+
+        deal(node, 1 * 1e18);
+        changePrank(node);
+        fulfillRequest(requestId);
+
+        changePrank(user);
 
         for (uint256 i = 0; i < rollDiceExample.lengthOfDiceResults(); i++) {
             emit log_uint(rollDiceExample.diceResults(i));
@@ -94,13 +127,17 @@ contract RandcastConsumerExampleTest is Test {
     }
 
     function testGetShuffledArray() public {
-        changePrank(admin);
-        deal(user, 1 * 10**18);
-        deal(address(arpa), address(getShuffledArrayExample), 200 * 10**18);
+        deal(user, 1 * 1e18);
         changePrank(user);
 
         uint32 upper = 10;
-        getShuffledArrayExample.getShuffledArray(upper);
+        bytes32 requestId = getShuffledArrayExample.getShuffledArray(upper);
+
+        deal(node, 1 * 1e18);
+        changePrank(node);
+        fulfillRequest(requestId);
+
+        changePrank(user);
 
         for (uint256 i = 0; i < upper; i++) {
             emit log_uint(getShuffledArrayExample.shuffleResults(i));
@@ -114,26 +151,38 @@ contract RandcastConsumerExampleTest is Test {
 
     function testAdvancedGetShuffledArray() public {
         changePrank(admin);
-        deal(user, 1 * 10**18);
-        deal(
-            address(arpa),
+        uint96 plentyOfArpaBalance = 1e6 * 1e18;
+        deal(address(arpa), address(admin), plentyOfArpaBalance);
+        arpa.approve(address(mockController), plentyOfArpaBalance);
+        uint64 subId = prepareSubscription(
             address(advancedGetShuffledArrayExample),
-            200 * 10**18
+            plentyOfArpaBalance
         );
+
+        deal(user, 1 * 1e18);
         changePrank(user);
 
         uint32 upper = 10;
         uint256 seed = 42;
         uint16 requestConfirmations = 0;
         uint256 callbackGasLimit = 260000;
+        uint256 callbackMaxGasPrice = 1 * 1e9;
 
-        advancedGetShuffledArrayExample
+        bytes32 requestId = advancedGetShuffledArrayExample
             .getRandomNumberThenGenerateShuffledArray(
                 upper,
+                subId,
                 seed,
                 requestConfirmations,
-                callbackGasLimit
+                callbackGasLimit,
+                callbackMaxGasPrice
             );
+
+        deal(node, 1 * 1e18);
+        changePrank(node);
+        fulfillRequest(requestId);
+
+        changePrank(user);
 
         assertEq(advancedGetShuffledArrayExample.lengthOfShuffleResults(), 1);
 
@@ -154,7 +203,4 @@ contract RandcastConsumerExampleTest is Test {
             }
         }
     }
-
-    // function testFailxxx() public {
-    // }
 }

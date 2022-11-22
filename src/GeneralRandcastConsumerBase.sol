@@ -26,9 +26,18 @@ abstract contract GeneralRandcastConsumerBase is
         103921425973949831153159651530394295952228049817797655588722524414385831936256;
     // Auto-calculating CallbackGasLimit in the first request call, also user can set it manually.
     uint256 public callbackGasLimit;
+    // Auto-estimating CallbackMaxGasFee as 3 times tx.gasprice of the request call, also user can set it manually.
+    // notes: tx.gasprice stands for effective_gas_price even post EIP-1559
+    // priority_fee_per_gas = min(transaction.max_priority_fee_per_gas, transaction.max_fee_per_gas - block.base_fee_per_gas)
+    // effective_gas_price = priority_fee_per_gas + block.base_fee_per_gas
+    uint256 public callbackMaxGasFee;
 
-    function setCallbackGasLimit(uint256 _callbackGasLimit) external onlyOwner {
+    function setCallbackGasConfig(
+        uint256 _callbackGasLimit,
+        uint256 _callbackMaxGasFee
+    ) external onlyOwner {
         callbackGasLimit = _callbackGasLimit;
+        callbackMaxGasFee = _callbackMaxGasFee;
     }
 
     function requestRandomness(RequestType requestType, bytes memory params)
@@ -106,9 +115,11 @@ abstract contract GeneralRandcastConsumerBase is
             rawRequestRandomness(
                 requestType,
                 params,
+                IController(controller).getLastSubscription(address(this)),
                 USER_SEED_PLACEHOLDER,
                 DEFAULT_REQUEST_CONFIRMATIONS,
-                callbackGasLimit
+                callbackGasLimit,
+                callbackMaxGasFee == 0 ? tx.gasprice * 3 : callbackMaxGasFee
             );
     }
 }

@@ -13,46 +13,46 @@ contract AdvancedGetShuffledArrayExample is
     mapping(bytes32 => uint256) public shuffledArrayUppers;
     uint256[][] public shuffleResults;
 
-    constructor(address controller, address arpa)
-        BasicRandcastConsumerBase(controller, arpa)
-    {}
+    constructor(address controller) BasicRandcastConsumerBase(controller) {}
 
     /**
      * Requests randomness
      */
     function getRandomNumberThenGenerateShuffledArray(
         uint256 shuffledArrayUpper,
+        uint64 subId,
         uint256 seed,
         uint16 requestConfirmations,
-        uint256 callbackGasLimit
-    ) external {
-        require(
-            arpa.balanceOf(address(this)) >= requestFee,
-            "Not enough ARPA - fill contract with faucet"
-        );
+        uint256 callbackGasLimit,
+        uint256 callbackMaxGasPrice
+    ) external returns (bytes32) {
         bytes memory params;
 
         uint256 rawSeed = makeRandcastInputSeed(seed, address(this), nonce);
         // This should be identical to controller generated requestId.
         bytes32 requestId = makeRequestId(rawSeed);
-
         shuffledArrayUppers[requestId] = shuffledArrayUpper;
 
-        rawRequestRandomness(
-            RequestType.Randomness,
-            params,
-            seed,
-            requestConfirmations,
-            callbackGasLimit
-        );
+        return
+            rawRequestRandomness(
+                RequestType.Randomness,
+                params,
+                subId,
+                seed,
+                requestConfirmations,
+                callbackGasLimit,
+                callbackMaxGasPrice
+            );
 
         // These equals to following code(recommended):
         // bytes32 requestId = rawRequestRandomness(
-        //     RequestType.Randomness,
-        //     params,
-        //     seed,
-        //     requestConfirmations,
-        //     callbackGasLimit
+        //    RequestType.Randomness,
+        //    params,
+        //    subId,
+        //    seed,
+        //    requestConfirmations,
+        //    callbackGasLimit,
+        //    callbackMaxGasPrice
         // );
 
         // shuffledArrayUppers[requestId] = shuffledArrayUpper;

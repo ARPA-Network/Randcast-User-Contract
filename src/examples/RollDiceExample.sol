@@ -8,20 +8,14 @@ contract RollDiceExample is GeneralRandcastConsumerBase {
     mapping(bytes32 => uint256[]) public randomResults;
     uint256[] public diceResults;
 
-    constructor(address controller, address arpa)
-        BasicRandcastConsumerBase(controller, arpa)
-    {}
+    constructor(address controller) BasicRandcastConsumerBase(controller) {}
 
     /**
      * Requests randomness
      */
-    function rollDice(uint32 bunch) external {
-        require(
-            arpa.balanceOf(address(this)) >= requestFee,
-            "Not enough ARPA - fill contract with faucet"
-        );
+    function rollDice(uint32 bunch) external returns (bytes32) {
         bytes memory params = abi.encode(bunch);
-        requestRandomness(RequestType.RandomWords, params);
+        return requestRandomness(RequestType.RandomWords, params);
     }
 
     /**
