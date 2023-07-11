@@ -2,24 +2,17 @@
 
 ## Overview
 
-This repo supports a set of useful APIs to integrate Randcast with user's app.
+This repo provides a set of libraries and examples that can be used to build a consumer contract for the Randcast service, aimed at helping developers import Randcast SDKs into their own projects.
 
-Contract developers can implement one or several base functions on the demand.
-
-## Development
-
-### Running tests
-
-1. [Install Foundry](https://github.com/foundry-rs/foundry#installation)
-
-2. Build contracts:
+## Installation
 
 ```bash
-forge build
+forge install ARPA-Network/Randcast-User-Contract
 ```
 
-3. Run tests:
+## Usage
 
-```bash
-forge test --gas-price 1000000000 -vv
-```
+For more details, please refer to the following links:
+
+- [Randcast Solidity Contracts](https://github.com/ARPA-Network/BLS-TSS-Network/tree/main/contracts)
+- [Randcast Book](https://docs.arpanetwork.io/randcast)
