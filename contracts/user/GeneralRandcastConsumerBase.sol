@@ -4,7 +4,7 @@ pragma solidity ^0.8.18;
 import {RequestIdBase} from "../utils/RequestIdBase.sol";
 import {GasEstimationBase} from "../utils/GasEstimationBase.sol";
 import {BasicRandcastConsumerBase, IAdapter} from "./BasicRandcastConsumerBase.sol";
-import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
+import {Ownable} from "../utils/Ownable.sol";
 
 /**
  * @notice This provides callbackGaslimit auto-calculating and TODO balance checking to save user's effort.
