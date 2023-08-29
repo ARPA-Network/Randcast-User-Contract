@@ -17,8 +17,6 @@ abstract contract GeneralRandcastConsumerBase is
 {
     // Sets user seed as 0 to so that users don't have to pass it.
     uint256 private constant _USER_SEED_PLACEHOLDER = 0;
-    // Default blocks the working group to wait before responding to the request.
-    uint16 private constant _DEFAULT_REQUEST_CONFIRMATIONS = 6;
     // TODO Gives a fixed buffer so that some logic differ in the callback slightly raising gas used will be supported.
     uint32 private constant _GAS_FOR_CALLBACK_OVERHEAD = 30_000;
     // Dummy randomness for estimating gas of callback.
@@ -32,6 +30,8 @@ abstract contract GeneralRandcastConsumerBase is
     // priority_fee_per_gas = min(transaction.max_priority_fee_per_gas, transaction.max_fee_per_gas - block.base_fee_per_gas)
     // effective_gas_price = priority_fee_per_gas + block.base_fee_per_gas
     uint256 public callbackMaxGasFee;
+    // Blocks the working group to wait before responding to the request.
+    uint16 public requestConfirmations;
 
     error GasLimitTooBig(uint256 have, uint32 want);
 
@@ -41,6 +41,10 @@ abstract contract GeneralRandcastConsumerBase is
         }
         callbackGasLimit = _callbackGasLimit;
         callbackMaxGasFee = _callbackMaxGasFee;
+    }
+
+    function setRequestConfirmations(uint16 _requestConfirmations) external onlyOwner {
+        requestConfirmations = _requestConfirmations;
     }
 
     function _requestRandomness(RequestType requestType, bytes memory params)
@@ -91,12 +95,16 @@ abstract contract GeneralRandcastConsumerBase is
 
             callbackGasLimit = uint32(gasUsed) + _GAS_FOR_CALLBACK_OVERHEAD;
         }
+        if (requestConfirmations == 0) {
+            (uint16 minimumRequestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
+            requestConfirmations = minimumRequestConfirmations;
+        }
         return _rawRequestRandomness(
             requestType,
             params,
             IAdapter(adapter).getLastSubscription(address(this)),
             _USER_SEED_PLACEHOLDER,
-            _DEFAULT_REQUEST_CONFIRMATIONS,
+            requestConfirmations,
             callbackGasLimit,
             callbackMaxGasFee == 0 ? tx.gasprice * 3 : callbackMaxGasFee
         );
