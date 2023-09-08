@@ -11,7 +11,7 @@ abstract contract BasicRandcastConsumerBase is IRequestTypeBase {
     address public immutable adapter;
     // Nonce on the user's side(count from 1) for generating real requestId,
     // which should be identical to the nonce on adapter's side, or it will be pointless.
-    uint256 public nonce = 1;
+    mapping(uint64 => uint256) /* subId */ /* nonce */ private nonces;
     // Ignore fulfilling from adapter check during fee estimation.
     bool private _isEstimatingCallbackGasLimit;
 
@@ -41,7 +41,7 @@ abstract contract BasicRandcastConsumerBase is IRequestTypeBase {
         uint32 callbackGasLimit,
         uint256 callbackMaxGasPrice
     ) internal returns (bytes32) {
-        nonce = nonce + 1;
+        nonces[subId] += 1;
 
         IAdapter.RandomnessRequestParams memory p = IAdapter.RandomnessRequestParams(
             requestType, params, subId, seed, requestConfirmations, callbackGasLimit, callbackMaxGasPrice
@@ -63,5 +63,13 @@ abstract contract BasicRandcastConsumerBase is IRequestTypeBase {
     function rawFulfillShuffledArray(bytes32 requestId, uint256[] memory shuffledArray) external {
         require(_isEstimatingCallbackGasLimit || msg.sender == adapter, "Only adapter can fulfill");
         _fulfillShuffledArray(requestId, shuffledArray);
+    }
+
+    /**
+     * Initialized nonce starts from 1.
+     * It can't be used to check whether this contract is bound to the subscription id.
+     */
+    function getNonce(uint64 subId) public view returns (uint256) {
+        return nonces[subId] + 1;
     }
 }

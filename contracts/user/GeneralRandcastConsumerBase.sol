@@ -56,11 +56,11 @@ abstract contract GeneralRandcastConsumerBase is
         // (1) the subscription id that the last addConsumer to
         // (2) the subscription id that the last requestRandomness used
         uint64 subId = IAdapter(adapter).getLastSubscription(address(this));
-        uint256 rawSeed = _makeRandcastInputSeed(_USER_SEED_PLACEHOLDER, subId, msg.sender, nonce);
-        // This should be identical to adapter generated requestId.
-        bytes32 requestId = _makeRequestId(rawSeed);
         // Only in the first place we calculate the callbackGasLimit, then next time we directly use it to request randomness.
         if (callbackGasLimit == 0) {
+            uint256 rawSeed = _makeRandcastInputSeed(_USER_SEED_PLACEHOLDER, subId, msg.sender, getNonce(subId));
+            // This should be identical to adapter generated requestId.
+            bytes32 requestId = _makeRequestId(rawSeed);
             // Prepares the message call of callback function according to request type
             bytes memory data;
             if (requestType == RequestType.Randomness) {

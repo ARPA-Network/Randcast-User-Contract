@@ -26,7 +26,7 @@ contract AdvancedGetShuffledArrayExample is RequestIdBase, BasicRandcastConsumer
     ) external returns (bytes32) {
         bytes memory params;
 
-        uint256 rawSeed = _makeRandcastInputSeed(seed, subId, address(this), nonce);
+        uint256 rawSeed = _makeRandcastInputSeed(seed, subId, address(this), getNonce(subId));
         // This should be identical to controller generated requestId.
         bytes32 requestId = _makeRequestId(rawSeed);
         shuffledArrayUppers[requestId] = shuffledArrayUpper;
