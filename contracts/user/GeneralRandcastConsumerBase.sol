@@ -47,56 +47,14 @@ abstract contract GeneralRandcastConsumerBase is
         requestConfirmations = _requestConfirmations;
     }
 
-    function _requestRandomness(RequestType requestType, bytes memory params)
-        internal
-        calculateCallbackGasLimit
-        returns (bytes32)
-    {
+    function _requestRandomness(RequestType requestType, bytes memory params) internal returns (bytes32) {
         // Use the last subscription id as the subId. The last subscription id will be the latest one of:
         // (1) the subscription id that the last addConsumer to
         // (2) the subscription id that the last requestRandomness used
         uint64 subId = IAdapter(adapter).getLastSubscription(address(this));
         // Only in the first place we calculate the callbackGasLimit, then next time we directly use it to request randomness.
         if (callbackGasLimit == 0) {
-            uint256 rawSeed = _makeRandcastInputSeed(_USER_SEED_PLACEHOLDER, subId, msg.sender, getNonce(subId));
-            // This should be identical to adapter generated requestId.
-            bytes32 requestId = _makeRequestId(rawSeed);
-            // Prepares the message call of callback function according to request type
-            bytes memory data;
-            if (requestType == RequestType.Randomness) {
-                data = abi.encodeWithSelector(this.rawFulfillRandomness.selector, requestId, _RANDOMNESS_PLACEHOLDER);
-            } else if (requestType == RequestType.RandomWords) {
-                uint32 numWords = abi.decode(params, (uint32));
-                uint256[] memory randomWords = new uint256[](numWords);
-                for (uint256 i = 0; i < numWords; i++) {
-                    randomWords[i] = uint256(keccak256(abi.encode(_RANDOMNESS_PLACEHOLDER, i)));
-                }
-                data = abi.encodeWithSelector(this.rawFulfillRandomWords.selector, requestId, randomWords);
-            } else if (requestType == RequestType.Shuffling) {
-                uint32 upper = abi.decode(params, (uint32));
-                uint256[] memory arr = new uint256[](upper);
-                for (uint256 k = 0; k < upper; k++) {
-                    arr[k] = k;
-                }
-                data = abi.encodeWithSelector(this.rawFulfillShuffledArray.selector, requestId, arr);
-            }
-
-            // We don't want message call for estimating gas to take effect, therefore success should be false,
-            // and result should be the reverted reason, which in fact is gas used we encoded to string.
-            (bool success, bytes memory result) =
-            // solhint-disable-next-line avoid-low-level-calls
-             address(this).call(abi.encodeWithSelector(this.requiredTxGas.selector, address(this), 0, data));
-
-            // This will be 0 if message call for callback fails,
-            // we pass this message to tell user that callback implementation need to be checked.
-            uint256 gasUsed = _parseGasUsed(result);
-
-            if (gasUsed > _MAX_GAS_LIMIT) {
-                revert GasLimitTooBig(gasUsed, _MAX_GAS_LIMIT);
-            }
-
-            require(!success && gasUsed != 0, "fulfillRandomness dry-run failed");
-
+            uint256 gasUsed = _dryRunCallbackToEstimateGas(requestType, params, subId);
             callbackGasLimit = uint32(gasUsed) + _GAS_FOR_CALLBACK_OVERHEAD;
         }
         if (requestConfirmations == 0) {
@@ -112,5 +70,52 @@ abstract contract GeneralRandcastConsumerBase is
             callbackGasLimit,
             callbackMaxGasFee == 0 ? tx.gasprice * 3 : callbackMaxGasFee
         );
+    }
+
+    function _dryRunCallbackToEstimateGas(RequestType requestType, bytes memory params, uint64 subId)
+        internal
+        isDryRun
+        returns (uint256)
+    {
+        uint256 rawSeed = _makeRandcastInputSeed(_USER_SEED_PLACEHOLDER, subId, msg.sender, getNonce(subId));
+        // This should be identical to adapter generated requestId.
+        bytes32 requestId = _makeRequestId(rawSeed);
+        // Prepares the message call of callback function according to request type
+        bytes memory data;
+        if (requestType == RequestType.Randomness) {
+            data = abi.encodeWithSelector(this.rawFulfillRandomness.selector, requestId, _RANDOMNESS_PLACEHOLDER);
+        } else if (requestType == RequestType.RandomWords) {
+            uint32 numWords = abi.decode(params, (uint32));
+            uint256[] memory randomWords = new uint256[](numWords);
+            for (uint256 i = 0; i < numWords; i++) {
+                randomWords[i] = uint256(keccak256(abi.encode(_RANDOMNESS_PLACEHOLDER, i)));
+            }
+            data = abi.encodeWithSelector(this.rawFulfillRandomWords.selector, requestId, randomWords);
+        } else if (requestType == RequestType.Shuffling) {
+            uint32 upper = abi.decode(params, (uint32));
+            uint256[] memory arr = new uint256[](upper);
+            for (uint256 k = 0; k < upper; k++) {
+                arr[k] = k;
+            }
+            data = abi.encodeWithSelector(this.rawFulfillShuffledArray.selector, requestId, arr);
+        }
+
+        // We don't want message call for estimating gas to take effect, therefore success should be false,
+        // and result should be the reverted reason, which in fact is gas used we encoded to string.
+        (bool success, bytes memory result) =
+        // solhint-disable-next-line avoid-low-level-calls
+         address(this).call(abi.encodeWithSelector(this.requiredTxGas.selector, address(this), 0, data));
+
+        // This will be 0 if message call for callback fails,
+        // we pass this message to tell user that callback implementation need to be checked.
+        uint256 gasUsed = _parseGasUsed(result);
+
+        if (gasUsed > _MAX_GAS_LIMIT) {
+            revert GasLimitTooBig(gasUsed, _MAX_GAS_LIMIT);
+        }
+
+        require(!success && gasUsed != 0, "fulfillRandomness dry-run failed");
+
+        return gasUsed;
     }
 }

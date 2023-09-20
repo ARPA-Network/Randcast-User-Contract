@@ -13,12 +13,12 @@ abstract contract BasicRandcastConsumerBase is IRequestTypeBase {
     // which should be identical to the nonce on adapter's side, or it will be pointless.
     mapping(uint64 => uint256) /* subId */ /* nonce */ private nonces;
     // Ignore fulfilling from adapter check during fee estimation.
-    bool private _isEstimatingCallbackGasLimit;
+    bool private _isDryRun;
 
-    modifier calculateCallbackGasLimit() {
-        _isEstimatingCallbackGasLimit = true;
+    modifier isDryRun() {
+        _isDryRun = true;
         _;
-        _isEstimatingCallbackGasLimit = false;
+        _isDryRun = false;
     }
 
     constructor(address _adapter) {
@@ -51,17 +51,17 @@ abstract contract BasicRandcastConsumerBase is IRequestTypeBase {
     }
 
     function rawFulfillRandomness(bytes32 requestId, uint256 randomness) external {
-        require(_isEstimatingCallbackGasLimit || msg.sender == adapter, "Only adapter can fulfill");
+        require(_isDryRun || msg.sender == adapter, "Only adapter can fulfill");
         _fulfillRandomness(requestId, randomness);
     }
 
     function rawFulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) external {
-        require(_isEstimatingCallbackGasLimit || msg.sender == adapter, "Only adapter can fulfill");
+        require(_isDryRun || msg.sender == adapter, "Only adapter can fulfill");
         _fulfillRandomWords(requestId, randomWords);
     }
 
     function rawFulfillShuffledArray(bytes32 requestId, uint256[] memory shuffledArray) external {
-        require(_isEstimatingCallbackGasLimit || msg.sender == adapter, "Only adapter can fulfill");
+        require(_isDryRun || msg.sender == adapter, "Only adapter can fulfill");
         _fulfillShuffledArray(requestId, shuffledArray);
     }
 
