@@ -69,7 +69,7 @@ function roll(uint256 randomness, uint256 size) pure returns (uint256 number) {
  * @param valueWeights An array of weight values corresponding to indices.
  * @return chosenIndex The picked index.
  */
-function pickByWeights(uint256 randomness, uint256[] memory valueWeights) pure returns(uint256 chosenIndex) {
+function pickByWeights(uint256 randomness, uint256[] memory valueWeights) pure returns (uint256 chosenIndex) {
     uint256 weightsLen = valueWeights.length;
     // Create copy of weights to avoid modifying original array.
     uint256[] memory weights = new uint256[](weightsLen);

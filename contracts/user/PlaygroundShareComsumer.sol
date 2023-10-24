@@ -26,9 +26,10 @@ contract PlaygroundShareComsumerContract is
     uint32 private constant GROUP_SIZE = 3;
 
     mapping(address => uint64) public userSubId;
-    
-    mapping (bytes32 => RequestData) internal requestIdToRequestData;
+
+    mapping(bytes32 => RequestData) internal requestIdToRequestData;
     // solhint-disable-next-line no-empty-blocks
+
     struct RequestData {
         address user;
         uint16 playType;
@@ -59,8 +60,7 @@ contract PlaygroundShareComsumerContract is
         uint64 subFreeRequestCount;
         uint256 subLastRequestTimestamp;
         uint64 subReqCountInCurrentPeriod;
-        try
-            IAdapter(adapter).getSubscription(subId) returns (
+        try IAdapter(adapter).getSubscription(subId) returns (
             address owner,
             address[] memory consumers,
             uint256 balance,
@@ -76,15 +76,14 @@ contract PlaygroundShareComsumerContract is
             subFreeRequestCount = freeRequestCount;
             subLastRequestTimestamp = lastRequestTimestamp;
             subReqCountInCurrentPeriod = reqCountInCurrentPeriod;
-        }
-        catch {
+        } catch {
             subBalance = 0;
             subReqCount = 0;
             subFreeRequestCount = 1;
             subLastRequestTimestamp = block.timestamp;
             subReqCountInCurrentPeriod = 0;
         }
-        
+
         (
             ,
             ,
@@ -148,32 +147,39 @@ contract PlaygroundShareComsumerContract is
         uint256 seed = 0;
         uint16 requestConfirmations = 1;
         callbackMaxGasPrice = callbackMaxGasPrice == 0 ? tx.gasprice * 3 : callbackMaxGasPrice;
-        if(callbackGasLimit == 0) {
+        if (callbackGasLimit == 0) {
             if (playType == TYPE_DRAW) {
                 callbackGasLimit = DRAW_CALLBACK_FEE;
                 requestId = _rawRequestRandomness(
-                    RequestType.Randomness, params, subId, seed, requestConfirmations, callbackGasLimit, callbackMaxGasPrice
+                    RequestType.Randomness,
+                    params,
+                    subId,
+                    seed,
+                    requestConfirmations,
+                    callbackGasLimit,
+                    callbackMaxGasPrice
                 );
             } else if (playType == TYPE_CAST) {
                 callbackGasLimit = CAST_CALLBACK_FEE;
                 params = abi.encode(winnerNumber);
                 requestId = _rawRequestRandomness(
-                    RequestType.RandomWords, params, subId, seed, requestConfirmations, callbackGasLimit, callbackMaxGasPrice
+                    RequestType.RandomWords,
+                    params,
+                    subId,
+                    seed,
+                    requestConfirmations,
+                    callbackGasLimit,
+                    callbackMaxGasPrice
                 );
-
             }
         }
 
-        requestIdToRequestData[requestId] = RequestData({
-            user: msg.sender,
-            playType: playType,
-            totalNumber: totalNumber,
-            winnerNumber: winnerNumber
-        });
+        requestIdToRequestData[requestId] =
+            RequestData({user: msg.sender, playType: playType, totalNumber: totalNumber, winnerNumber: winnerNumber});
     }
 
     /**
-     * Callback function used by Randcast Adapter
+     * Callback function used by Randcast Adapter to generate a sets of dice result
      */
     function _fulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) internal override {
         RequestData memory requestData = requestIdToRequestData[requestId];
@@ -183,6 +189,9 @@ contract PlaygroundShareComsumerContract is
         }
         emit PlayResult(requestData.user, requestId, diceResults);
     }
+    /**
+     * Callback function used by Randcast Adapter to pick winner from a set of tickets
+     */
 
     function _fulfillRandomness(bytes32 requestId, uint256 randomness) internal override {
         RequestData memory requestData = requestIdToRequestData[requestId];
@@ -202,5 +211,4 @@ contract PlaygroundShareComsumerContract is
         payable(msg.sender).transfer(balance);
         delete userSubId[msg.sender];
     }
-
 }
