@@ -32,8 +32,19 @@ interface IAdapter is IRequestTypeBase {
         uint256 blockNum;
     }
 
+    // controller transaction
+    function nodeWithdrawETH(address recipient, uint256 ethAmount) external;
+
     // consumer contract transaction
     function requestRandomness(RandomnessRequestParams calldata params) external returns (bytes32);
+
+    function fulfillRandomness(
+        uint32 groupIndex,
+        bytes32 requestId,
+        uint256 signature,
+        RequestDetail calldata requestDetail,
+        PartialSignature[] calldata partialSignatures
+    ) external;
 
     // user transaction
     function createSubscription() external returns (uint64);
@@ -47,6 +58,9 @@ interface IAdapter is IRequestTypeBase {
     function cancelSubscription(uint64 subId, address to) external;
 
     function removeConsumer(uint64 subId, address consumer) external;
+
+    // delete the request that cannot be fulfilled, triggered by user themselves
+    function cancelOvertimeRequest(bytes32 requestId, RequestDetail calldata requestDetail) external;
 
     // view
     function getLastSubscription(address consumer) external view returns (uint64);
@@ -129,6 +143,7 @@ interface IAdapter is IRequestTypeBase {
         uint32 callbackGasLimit,
         uint32 gasExceptCallback,
         uint32 fulfillmentFlatFeeEthPPM,
-        uint256 weiPerUnitGas
+        uint256 weiPerUnitGas,
+        uint32 groupSize
     ) external view returns (uint256);
 }
