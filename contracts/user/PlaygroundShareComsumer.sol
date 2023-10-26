@@ -26,18 +26,11 @@ contract PlaygroundShareComsumerContract is
 
     mapping(address => uint64) public userSubId;
 
-    mapping(bytes32 => DrawRequestData) internal requestIdToDrawRequestData;
-    mapping(bytes32 => RollRequestData) internal requestIdToRollRequestData;
+    mapping(bytes32 => RequestData) public requestIdToRequestData;
 
-    struct DrawRequestData {
-        address user;
-        uint256 totalNumber;
-        uint256 winnerNumber;
-    }
-
-    struct RollRequestData {
-        address user;
-        uint256 rollNumber;
+    struct RequestData {
+        PlayType playType;
+        bytes param;
     }
 
     enum PlayType {
@@ -48,10 +41,9 @@ contract PlaygroundShareComsumerContract is
     event requestRollEvent(
         address user,
         uint64 subId,
-        PlayType playType,
         bytes32 requestId,
         uint256 paidAmount,
-        uint256 rollNumber,
+        uint256 bunch,
         uint256 seed,
         uint16 requestConfirmations
     );
@@ -59,7 +51,6 @@ contract PlaygroundShareComsumerContract is
     event requestDrawEvent(
         address user,
         uint64 subId,
-        PlayType playType,
         bytes32 requestId,
         uint256 paidAmount,
         uint256 totalNumber,
@@ -68,10 +59,11 @@ contract PlaygroundShareComsumerContract is
         uint16 requestConfirmations
     );
 
-    event RollResult(address user, bytes32 requestId, uint256[] result);
-    event DrawResult(address user, bytes32 requestId, uint256[] result);
+    event RollResult(bytes32 requestId, uint256[] result);
+    event DrawResult(bytes32 requestId, uint256[] result);
 
     error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
+    error InvalidSubId();
 
     constructor(address adapter) BasicRandcastConsumerBase(adapter) {}
     // solhint-disable-next-line no-empty-blocks
@@ -90,8 +82,11 @@ contract PlaygroundShareComsumerContract is
             }
         }
         uint256 fundAmount = estimateFee(playType, subId);
-        if (msg.value >= fundAmount) {
+        if (msg.value < fundAmount) {
             revert InsufficientFund({fundAmount: fundAmount, requiredAmount: msg.value});
+        }
+        if (fundAmount == 0) {
+            return subId;
         }
         IAdapter(adapter).fundSubscription{value: msg.value}(subId);
         return subId;
@@ -171,28 +166,26 @@ contract PlaygroundShareComsumerContract is
                 reqCountCalc = reqCountInCurrentPeriod + 1;
             }
         }
-
         if (freeRequestCount == 0) {
             tierFee = IAdapter(adapter).getFeeTier(reqCountCalc) * feeConfig.flatFeePromotionGlobalPercentage / 100;
         }
-        tierFee = 0;
     }
 
-    function getRandomnessThenRollDice(uint256 rollNumber, uint256 seed, uint16 requestConfirmations, uint64 subId)
+    function getRandomnessThenRollDice(uint256 bunch, uint256 seed, uint16 requestConfirmations, uint64 subId)
         external
         payable
         returns (bytes32 requestId)
     {
-        _fundSubId(PlayType.Roll, subId);
+        subId = _fundSubId(PlayType.Roll, subId);
         bytes memory params;
-        params = abi.encode(rollNumber);
+        params = abi.encode(bunch);
         requestId = _rawRequestRandomness(
             RequestType.RandomWords, params, subId, seed, requestConfirmations, ROLL_CALLBACK_FEE, tx.gasprice * 3
         );
-        requestIdToRollRequestData[requestId] = RollRequestData(msg.sender, rollNumber);
         emit requestRollEvent(
-            msg.sender, subId, PlayType.Roll, requestId, msg.value, rollNumber, seed, requestConfirmations
+            msg.sender, subId, requestId, msg.value, bunch, seed, requestConfirmations
         );
+        requestIdToRequestData[requestId] = RequestData(PlayType.Roll, abi.encode(bunch));
     }
 
     function getRandomnessThenDrawTickects(
@@ -202,16 +195,14 @@ contract PlaygroundShareComsumerContract is
         uint16 requestConfirmations,
         uint64 subId
     ) external payable returns (bytes32 requestId) {
-        _fundSubId(PlayType.Draw, subId);
+        subId = _fundSubId(PlayType.Draw, subId);
         bytes memory params;
         requestId = _rawRequestRandomness(
             RequestType.Randomness, params, subId, seed, requestConfirmations, DRAW_CALLBACK_FEE, tx.gasprice * 3
         );
-        requestIdToDrawRequestData[requestId] = DrawRequestData(msg.sender, totalNumber, winnerNumber);
         emit requestDrawEvent(
             msg.sender,
             subId,
-            PlayType.Draw,
             requestId,
             msg.value,
             totalNumber,
@@ -219,32 +210,41 @@ contract PlaygroundShareComsumerContract is
             seed,
             requestConfirmations
         );
+        requestIdToRequestData[requestId] = RequestData(PlayType.Draw, abi.encode(totalNumber, winnerNumber));
     }
 
     /**
      * Callback function used by Randcast Adapter to generate a sets of dice result
      */
     function _fulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) internal override {
-        RollRequestData memory requestData = requestIdToRollRequestData[requestId];
-        uint256[] memory diceResults = new uint256[](randomWords.length);
-        for (uint32 i = 0; i < randomWords.length; i++) {
-            diceResults[i] = RandcastSDK.roll(randomWords[i], 6) + 1;
+        RequestData memory requestData = requestIdToRequestData[requestId];
+        if (requestData.playType == PlayType.Roll) {
+            (uint256 bunch) = abi.decode(requestData.param, (uint256));
+            uint256[] memory diceResults = new uint256[](bunch);
+            for (uint32 i = 0; i < randomWords.length; i++) {
+                diceResults[i] = RandcastSDK.roll(randomWords[i], 6) + 1;
+            }
+            emit RollResult(requestId, diceResults);
+            delete requestIdToRequestData[requestId];
         }
-        emit RollResult(requestData.user, requestId, diceResults);
+
     }
+
     /**
      * Callback function used by Randcast Adapter to pick winner from a set of tickets
      */
 
     function _fulfillRandomness(bytes32 requestId, uint256 randomness) internal override {
-        DrawRequestData memory requestData = requestIdToDrawRequestData[requestId];
-        uint256[] memory tickets = new uint256[](requestData.totalNumber);
+        RequestData memory requestData = requestIdToRequestData[requestId];
+        (uint256 totalNumber, uint256 winnerNumber) = abi.decode(requestData.param, (uint256, uint256));
+        uint256[] memory tickets = new uint256[](totalNumber);
         uint256[] memory winnerResults;
-        for (uint32 i = 0; i < requestData.totalNumber; i++) {
+        for (uint32 i = 0; i < totalNumber; i++) {
             tickets[i] = i;
         }
-        winnerResults = RandcastSDK.draw(randomness, tickets, requestData.winnerNumber);
-        emit DrawResult(requestData.user, requestId, winnerResults);
+        winnerResults = RandcastSDK.draw(randomness, tickets, winnerNumber);
+        emit DrawResult(requestId, winnerResults);
+        delete requestIdToRequestData[requestId];
     }
 
     function cancelSubscription() external {
@@ -260,6 +260,9 @@ contract PlaygroundShareComsumerContract is
 
     function setTrialSubscription(uint64 _trialSubId) external onlyOwner {
         trialSubId = _trialSubId;
-        IAdapter(adapter).addConsumer(trialSubId, address(this));
+    }
+
+    function getTrialSubscription() external view returns (uint64) {
+        return trialSubId;
     }
 }
