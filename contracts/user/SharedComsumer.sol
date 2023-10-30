@@ -9,7 +9,12 @@ import {IAdapter} from "../interfaces/IAdapter.sol";
 // solhint-disable-next-line no-global-import
 import "./RandcastSDK.sol" as RandcastSDK;
 
-contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
+contract SharedComsumerContract is
+    RequestIdBase,
+    BasicRandcastConsumerBase,
+    UUPSUpgradeable,
+    OwnableUpgradeable
+{
     // To be update
     uint32 private constant DRAW_CALLBACK_GAS_BASE = 1200000;
     uint32 private constant ROLL_CALLBACK_GAS_BASE = 1000000;
@@ -72,7 +77,6 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         __Ownable_init(msg.sender);
     }
     // solhint-disable-next-line no-empty-blocks
-
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
     function _fundSubId(PlayType playType, uint64 subId, bytes memory params) internal returns (uint64) {
@@ -106,7 +110,6 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         uint64 reqCountInCurrentPeriod;
         uint256 lastRequestTimestamp;
     }
-
     function _getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
         (
             ,
@@ -120,12 +123,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
             sub.lastRequestTimestamp
         ) = IAdapter(adapter).getSubscription(subId);
     }
-
-    function estimateFee(PlayType playType, uint64 subId, bytes memory params)
-        public
-        view
-        returns (uint256 requestFee)
-    {
+    function estimateFee(PlayType playType, uint64 subId, bytes memory params) public view returns (uint256 requestFee) {
         uint32 callbackGasLimit = _calculateGasLimit(playType, params);
         if (subId == 0) {
             subId = userSubIds[msg.sender];
@@ -146,7 +144,6 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         );
         return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
     }
-
     function _calculateTierFee(uint64 reqCount, uint256 lastRequestTimestamp, uint64 reqCountInCurrentPeriod)
         internal
         view
@@ -178,7 +175,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
             (uint32 totalNumber, uint32 winnerNumber) = abi.decode(params, (uint32, uint32));
             gasLimit = DRAW_CALLBACK_GAS_BASE + (totalNumber + winnerNumber) * 100;
         } else if (playType == PlayType.Roll) {
-            (uint32 bunch,) = abi.decode(params, (uint32, uint32));
+            (uint32 bunch, ) = abi.decode(params, (uint32, uint32));
             gasLimit = ROLL_CALLBACK_GAS_BASE + bunch * 100;
         }
     }
@@ -225,6 +222,9 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         if (gasLimit > MAX_GAS_LIMIT) {
             revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
         }
+        if (requestConfirmations == 0) {
+            (requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
+        }
         subId = _fundSubId(PlayType.Roll, subId, calcParams);
         bytes memory params;
         params = abi.encode(bunch);
@@ -244,11 +244,13 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
     ) external payable returns (bytes32 requestId) {
         bytes memory calcParams = abi.encode(totalNumber, winnerNumber);
         uint32 gasLimit = _calculateGasLimit(PlayType.Draw, calcParams);
-
+        
         if (gasLimit > MAX_GAS_LIMIT) {
             revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
         }
-
+        if (requestConfirmations == 0) {
+            (requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
+        }
         subId = _fundSubId(PlayType.Draw, subId, calcParams);
         bytes memory params;
         requestId = _rawRequestRandomness(
