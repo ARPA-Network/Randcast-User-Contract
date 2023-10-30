@@ -18,8 +18,9 @@ interface ISharedComsumer {
         address user,
         uint64 subId,
         bytes32 requestId,
+        uint32 bunch,
+        uint32 size,
         uint256 paidAmount,
-        uint256 bunch,
         uint256 seed,
         uint16 requestConfirmations
     );
@@ -28,9 +29,9 @@ interface ISharedComsumer {
         address user,
         uint64 subId,
         bytes32 requestId,
+        uint32 totalNumber,
+        uint32 winnerNumber,
         uint256 paidAmount,
-        uint256 totalNumber,
-        uint256 winnerNumber,
         uint256 seed,
         uint16 requestConfirmations
     );
@@ -47,7 +48,7 @@ interface ISharedComsumer {
         view
         returns (uint256 requestFee);
 
-    function rollDice(uint32 bunch, uint64 subId, uint256 seed, uint16 requestConfirmations)
+    function rollDice(uint32 bunch, uint32 size, uint64 subId, uint256 seed, uint16 requestConfirmations)
         external
         payable
         returns (bytes32 requestId);

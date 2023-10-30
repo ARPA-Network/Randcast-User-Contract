@@ -38,8 +38,9 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         address user,
         uint64 subId,
         bytes32 requestId,
+        uint32 bunch,
+        uint32 size,
         uint256 paidAmount,
-        uint256 bunch,
         uint256 seed,
         uint16 requestConfirmations
     );
@@ -48,9 +49,9 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         address user,
         uint64 subId,
         bytes32 requestId,
+        uint32 totalNumber,
+        uint32 winnerNumber,
         uint256 paidAmount,
-        uint256 totalNumber,
-        uint256 winnerNumber,
         uint256 seed,
         uint16 requestConfirmations
     );
@@ -106,7 +107,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         uint256 lastRequestTimestamp;
     }
 
-    function getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
+    function _getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
         (
             ,
             ,
@@ -135,7 +136,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
             }
         }
         // Get subscription details only if subId is not zero
-        Subscription memory sub = getSubscription(subId);
+        Subscription memory sub = _getSubscription(subId);
         uint32 tierFee;
         if (sub.freeRequestCount == 0) {
             tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
@@ -177,7 +178,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
             (uint32 totalNumber, uint32 winnerNumber) = abi.decode(params, (uint32, uint32));
             gasLimit = DRAW_CALLBACK_GAS_BASE + (totalNumber + winnerNumber) * 100;
         } else if (playType == PlayType.Roll) {
-            (uint32 bunch) = abi.decode(params, (uint32));
+            (uint32 bunch,) = abi.decode(params, (uint32, uint32));
             gasLimit = ROLL_CALLBACK_GAS_BASE + bunch * 100;
         }
     }
@@ -214,24 +215,24 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         }
     }
 
-    function rollDice(uint32 bunch, uint64 subId, uint256 seed, uint16 requestConfirmations)
+    function rollDice(uint32 bunch, uint32 size, uint64 subId, uint256 seed, uint16 requestConfirmations)
         external
         payable
         returns (bytes32 requestId)
     {
-        bytes memory params;
-        params = abi.encode(bunch);
-        uint32 gasLimit = _calculateGasLimit(PlayType.Roll, params);
+        bytes memory calcParams = abi.encode(bunch, size);
+        uint32 gasLimit = _calculateGasLimit(PlayType.Roll, calcParams);
         if (gasLimit > MAX_GAS_LIMIT) {
             revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
         }
-
-        subId = _fundSubId(PlayType.Roll, subId, params);
+        subId = _fundSubId(PlayType.Roll, subId, calcParams);
+        bytes memory params;
+        params = abi.encode(bunch);
         requestId = _rawRequestRandomness(
             RequestType.RandomWords, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
         );
-        emit RollDiceRequest(msg.sender, subId, requestId, msg.value, bunch, seed, requestConfirmations);
-        pendingRequests[requestId] = RequestData(PlayType.Roll, abi.encode(bunch));
+        emit RollDiceRequest(msg.sender, subId, requestId, bunch, size, msg.value, seed, requestConfirmations);
+        pendingRequests[requestId] = RequestData(PlayType.Roll, calcParams);
     }
 
     function drawTickets(
@@ -254,9 +255,9 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
             RequestType.Randomness, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
         );
         emit DrawTicketsRequest(
-            msg.sender, subId, requestId, msg.value, totalNumber, winnerNumber, seed, requestConfirmations
+            msg.sender, subId, requestId, totalNumber, winnerNumber, msg.value, seed, requestConfirmations
         );
-        pendingRequests[requestId] = RequestData(PlayType.Draw, abi.encode(totalNumber, winnerNumber));
+        pendingRequests[requestId] = RequestData(PlayType.Draw, calcParams);
     }
 
     /**
@@ -265,10 +266,10 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
     function _fulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) internal override {
         RequestData memory requestData = pendingRequests[requestId];
         if (requestData.playType == PlayType.Roll) {
-            (uint256 bunch) = abi.decode(requestData.param, (uint256));
+            (uint32 bunch, uint32 size) = abi.decode(requestData.param, (uint32, uint32));
             uint256[] memory diceResults = new uint256[](bunch);
             for (uint32 i = 0; i < randomWords.length; i++) {
-                diceResults[i] = RandcastSDK.roll(randomWords[i], 6) + 1;
+                diceResults[i] = RandcastSDK.roll(randomWords[i], size) + 1;
             }
             emit RollDiceResult(requestId, diceResults);
             delete pendingRequests[requestId];
@@ -281,7 +282,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
 
     function _fulfillRandomness(bytes32 requestId, uint256 randomness) internal override {
         RequestData memory requestData = pendingRequests[requestId];
-        (uint256 totalNumber, uint256 winnerNumber) = abi.decode(requestData.param, (uint256, uint256));
+        (uint32 totalNumber, uint32 winnerNumber) = abi.decode(requestData.param, (uint32, uint32));
         uint256[] memory tickets = new uint256[](totalNumber);
         uint256[] memory winnerResults;
         for (uint32 i = 0; i < totalNumber; i++) {
