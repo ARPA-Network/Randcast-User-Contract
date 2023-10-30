@@ -20,9 +20,9 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
     // common subId for trial
     uint64 trialSubId;
 
-    mapping(address => uint64) public userSubId;
+    mapping(address => uint64) public userSubIds;
 
-    mapping(bytes32 => RequestData) public requestIdToRequestData;
+    mapping(bytes32 => RequestData) public pendingRequests;
 
     struct RequestData {
         PlayType playType;
@@ -34,7 +34,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         Roll
     }
 
-    event RequestRollEvent(
+    event RollDiceRequest(
         address user,
         uint64 subId,
         bytes32 requestId,
@@ -44,7 +44,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         uint16 requestConfirmations
     );
 
-    event RequestDrawEvent(
+    event DrawTicketsRequest(
         address user,
         uint64 subId,
         bytes32 requestId,
@@ -55,8 +55,8 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         uint16 requestConfirmations
     );
 
-    event RollResult(bytes32 requestId, uint256[] result);
-    event DrawResult(bytes32 requestId, uint256[] result);
+    event RollDiceResult(bytes32 requestId, uint256[] result);
+    event DrawTicketsResult(bytes32 requestId, uint256[] result);
 
     error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
     error InvalidSubId();
@@ -79,11 +79,11 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
             return subId;
         }
         if (subId == 0) {
-            subId = userSubId[msg.sender];
+            subId = userSubIds[msg.sender];
             if (subId == 0) {
                 subId = IAdapter(adapter).createSubscription();
                 IAdapter(adapter).addConsumer(subId, address(this));
-                userSubId[msg.sender] = subId;
+                userSubIds[msg.sender] = subId;
             }
         }
         uint256 fundAmount = estimateFee(playType, subId, params);
@@ -106,7 +106,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         uint256 lastRequestTimestamp;
     }
 
-    function _getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
+    function getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
         (
             ,
             ,
@@ -127,7 +127,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
     {
         uint32 callbackGasLimit = _calculateGasLimit(playType, params);
         if (subId == 0) {
-            subId = userSubId[msg.sender];
+            subId = userSubIds[msg.sender];
             if (subId == 0) {
                 return IAdapter(adapter).estimatePaymentAmountInETH(
                     callbackGasLimit, FEE_OVERHEAD, 0, tx.gasprice * 3, GROUP_SIZE
@@ -135,7 +135,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
             }
         }
         // Get subscription details only if subId is not zero
-        Subscription memory sub = _getSubscription(subId);
+        Subscription memory sub = getSubscription(subId);
         uint32 tierFee;
         if (sub.freeRequestCount == 0) {
             tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
@@ -214,7 +214,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         }
     }
 
-    function getRandomnessThenRollDice(uint32 bunch, uint16 requestConfirmations, uint64 subId, uint256 seed)
+    function rollDice(uint32 bunch, uint64 subId, uint256 seed, uint16 requestConfirmations)
         external
         payable
         returns (bytes32 requestId)
@@ -230,16 +230,16 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         requestId = _rawRequestRandomness(
             RequestType.RandomWords, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
         );
-        emit RequestRollEvent(msg.sender, subId, requestId, msg.value, bunch, seed, requestConfirmations);
-        requestIdToRequestData[requestId] = RequestData(PlayType.Roll, abi.encode(bunch));
+        emit RollDiceRequest(msg.sender, subId, requestId, msg.value, bunch, seed, requestConfirmations);
+        pendingRequests[requestId] = RequestData(PlayType.Roll, abi.encode(bunch));
     }
 
-    function getRandomnessThenDrawTickects(
+    function drawTickets(
         uint32 totalNumber,
         uint32 winnerNumber,
         uint64 subId,
-        uint16 requestConfirmations,
-        uint256 seed
+        uint256 seed,
+        uint16 requestConfirmations
     ) external payable returns (bytes32 requestId) {
         bytes memory calcParams = abi.encode(totalNumber, winnerNumber);
         uint32 gasLimit = _calculateGasLimit(PlayType.Draw, calcParams);
@@ -253,25 +253,25 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
         requestId = _rawRequestRandomness(
             RequestType.Randomness, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
         );
-        emit RequestDrawEvent(
+        emit DrawTicketsRequest(
             msg.sender, subId, requestId, msg.value, totalNumber, winnerNumber, seed, requestConfirmations
         );
-        requestIdToRequestData[requestId] = RequestData(PlayType.Draw, abi.encode(totalNumber, winnerNumber));
+        pendingRequests[requestId] = RequestData(PlayType.Draw, abi.encode(totalNumber, winnerNumber));
     }
 
     /**
      * Callback function used by Randcast Adapter to generate a sets of dice result
      */
     function _fulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) internal override {
-        RequestData memory requestData = requestIdToRequestData[requestId];
+        RequestData memory requestData = pendingRequests[requestId];
         if (requestData.playType == PlayType.Roll) {
             (uint256 bunch) = abi.decode(requestData.param, (uint256));
             uint256[] memory diceResults = new uint256[](bunch);
             for (uint32 i = 0; i < randomWords.length; i++) {
                 diceResults[i] = RandcastSDK.roll(randomWords[i], 6) + 1;
             }
-            emit RollResult(requestId, diceResults);
-            delete requestIdToRequestData[requestId];
+            emit RollDiceResult(requestId, diceResults);
+            delete pendingRequests[requestId];
         }
     }
 
@@ -280,7 +280,7 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
      */
 
     function _fulfillRandomness(bytes32 requestId, uint256 randomness) internal override {
-        RequestData memory requestData = requestIdToRequestData[requestId];
+        RequestData memory requestData = pendingRequests[requestId];
         (uint256 totalNumber, uint256 winnerNumber) = abi.decode(requestData.param, (uint256, uint256));
         uint256[] memory tickets = new uint256[](totalNumber);
         uint256[] memory winnerResults;
@@ -288,17 +288,17 @@ contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUP
             tickets[i] = i;
         }
         winnerResults = RandcastSDK.draw(randomness, tickets, winnerNumber);
-        emit DrawResult(requestId, winnerResults);
-        delete requestIdToRequestData[requestId];
+        emit DrawTicketsResult(requestId, winnerResults);
+        delete pendingRequests[requestId];
     }
 
     function cancelSubscription() external {
-        uint64 subId = userSubId[msg.sender];
+        uint64 subId = userSubIds[msg.sender];
         if (subId == 0) {
             return;
         }
         IAdapter(adapter).cancelSubscription(subId, msg.sender);
-        delete userSubId[msg.sender];
+        delete userSubIds[msg.sender];
     }
 
     function setTrialSubscription(uint64 _trialSubId) external onlyOwner {

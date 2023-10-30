@@ -14,7 +14,7 @@ interface ISharedComsumer {
         Roll
     }
 
-    event RequestRollEvent(
+    event RollDiceRequest(
         address user,
         uint64 subId,
         bytes32 requestId,
@@ -24,7 +24,7 @@ interface ISharedComsumer {
         uint16 requestConfirmations
     );
 
-    event RequestDrawEvent(
+    event DrawTicketsRequest(
         address user,
         uint64 subId,
         bytes32 requestId,
@@ -35,8 +35,8 @@ interface ISharedComsumer {
         uint16 requestConfirmations
     );
 
-    event RollResult(bytes32 requestId, uint256[] result);
-    event DrawResult(bytes32 requestId, uint256[] result);
+    event RollDiceResult(bytes32 requestId, uint256[] result);
+    event DrawTicketsResult(bytes32 requestId, uint256[] result);
 
     error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
     error InvalidSubId();
@@ -47,17 +47,17 @@ interface ISharedComsumer {
         view
         returns (uint256 requestFee);
 
-    function getRandomnessThenRollDice(uint32 bunch, uint16 requestConfirmations, uint64 subId, uint256 seed)
+    function rollDice(uint32 bunch, uint64 subId, uint256 seed, uint16 requestConfirmations)
         external
         payable
         returns (bytes32 requestId);
 
-    function getRandomnessThenDrawTickects(
+    function drawTickets(
         uint32 totalNumber,
         uint32 winnerNumber,
         uint64 subId,
-        uint16 requestConfirmations,
-        uint256 seed
+        uint256 seed,
+        uint16 requestConfirmations
     ) external payable returns (bytes32 requestId);
 
     function cancelSubscription() external;
