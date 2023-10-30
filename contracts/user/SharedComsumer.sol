@@ -9,12 +9,7 @@ import {IAdapter} from "../interfaces/IAdapter.sol";
 // solhint-disable-next-line no-global-import
 import "./RandcastSDK.sol" as RandcastSDK;
 
-contract PlaygroundShareComsumerContract is
-    RequestIdBase,
-    BasicRandcastConsumerBase,
-    UUPSUpgradeable,
-    OwnableUpgradeable
-{
+contract SharedComsumerContract is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
     // To be update
     uint32 private constant DRAW_CALLBACK_GAS_BASE = 1200000;
     uint32 private constant ROLL_CALLBACK_GAS_BASE = 1000000;
@@ -39,7 +34,7 @@ contract PlaygroundShareComsumerContract is
         Roll
     }
 
-    event requestRollEvent(
+    event RequestRollEvent(
         address user,
         uint64 subId,
         bytes32 requestId,
@@ -49,7 +44,7 @@ contract PlaygroundShareComsumerContract is
         uint16 requestConfirmations
     );
 
-    event requestDrawEvent(
+    event RequestDrawEvent(
         address user,
         uint64 subId,
         bytes32 requestId,
@@ -73,9 +68,10 @@ contract PlaygroundShareComsumerContract is
     }
 
     function initialize() public initializer {
-        __Ownable_init();
+        __Ownable_init(msg.sender);
     }
     // solhint-disable-next-line no-empty-blocks
+
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
     function _fundSubId(PlayType playType, uint64 subId, bytes memory params) internal returns (uint64) {
@@ -109,7 +105,8 @@ contract PlaygroundShareComsumerContract is
         uint64 reqCountInCurrentPeriod;
         uint256 lastRequestTimestamp;
     }
-    function getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
+
+    function _getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
         (
             ,
             ,
@@ -122,7 +119,12 @@ contract PlaygroundShareComsumerContract is
             sub.lastRequestTimestamp
         ) = IAdapter(adapter).getSubscription(subId);
     }
-    function estimateFee(PlayType playType, uint64 subId, bytes memory params) public view returns (uint256 requestFee) {
+
+    function estimateFee(PlayType playType, uint64 subId, bytes memory params)
+        public
+        view
+        returns (uint256 requestFee)
+    {
         uint32 callbackGasLimit = _calculateGasLimit(playType, params);
         if (subId == 0) {
             subId = userSubId[msg.sender];
@@ -133,7 +135,7 @@ contract PlaygroundShareComsumerContract is
             }
         }
         // Get subscription details only if subId is not zero
-        Subscription memory sub = getSubscription(subId);
+        Subscription memory sub = _getSubscription(subId);
         uint32 tierFee;
         if (sub.freeRequestCount == 0) {
             tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
@@ -143,6 +145,7 @@ contract PlaygroundShareComsumerContract is
         );
         return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
     }
+
     function _calculateTierFee(uint64 reqCount, uint256 lastRequestTimestamp, uint64 reqCountInCurrentPeriod)
         internal
         view
@@ -185,7 +188,8 @@ contract PlaygroundShareComsumerContract is
         uint256 flatFeePromotionStartTimestamp;
         uint256 flatFeePromotionEndTimestamp;
     }
-    function _getFlatFeeConfig() public view returns (FeeConfig memory feeConfig) {
+
+    function _getFlatFeeConfig() internal view returns (FeeConfig memory feeConfig) {
         {
             (, bytes memory point) =
             // solhint-disable-next-line avoid-low-level-calls
@@ -226,7 +230,7 @@ contract PlaygroundShareComsumerContract is
         requestId = _rawRequestRandomness(
             RequestType.RandomWords, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
         );
-        emit requestRollEvent(msg.sender, subId, requestId, msg.value, bunch, seed, requestConfirmations);
+        emit RequestRollEvent(msg.sender, subId, requestId, msg.value, bunch, seed, requestConfirmations);
         requestIdToRequestData[requestId] = RequestData(PlayType.Roll, abi.encode(bunch));
     }
 
@@ -239,7 +243,7 @@ contract PlaygroundShareComsumerContract is
     ) external payable returns (bytes32 requestId) {
         bytes memory calcParams = abi.encode(totalNumber, winnerNumber);
         uint32 gasLimit = _calculateGasLimit(PlayType.Draw, calcParams);
-        
+
         if (gasLimit > MAX_GAS_LIMIT) {
             revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
         }
@@ -249,7 +253,7 @@ contract PlaygroundShareComsumerContract is
         requestId = _rawRequestRandomness(
             RequestType.Randomness, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
         );
-        emit requestDrawEvent(
+        emit RequestDrawEvent(
             msg.sender, subId, requestId, msg.value, totalNumber, winnerNumber, seed, requestConfirmations
         );
         requestIdToRequestData[requestId] = RequestData(PlayType.Draw, abi.encode(totalNumber, winnerNumber));

@@ -3,8 +3,7 @@ pragma solidity ^0.8.18;
 
 import {IRequestTypeBase} from "./IRequestTypeBase.sol";
 
-interface IPlaygroundShareComsumer{
-
+interface ISharedComsumer {
     struct RequestData {
         PlayType playType;
         bytes param;
@@ -15,7 +14,7 @@ interface IPlaygroundShareComsumer{
         Roll
     }
 
-    event requestRollEvent(
+    event RequestRollEvent(
         address user,
         uint64 subId,
         bytes32 requestId,
@@ -25,7 +24,7 @@ interface IPlaygroundShareComsumer{
         uint16 requestConfirmations
     );
 
-    event requestDrawEvent(
+    event RequestDrawEvent(
         address user,
         uint64 subId,
         bytes32 requestId,
@@ -41,14 +40,18 @@ interface IPlaygroundShareComsumer{
 
     error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
     error InvalidSubId();
+    error GasLimitTooBig(uint256 have, uint32 want);
 
-    function estimateFee(PlayType playType, uint64 subId, bytes memory params) external view returns (uint256 requestFee);
+    function estimateFee(PlayType playType, uint64 subId, bytes memory params)
+        external
+        view
+        returns (uint256 requestFee);
 
     function getRandomnessThenRollDice(uint32 bunch, uint16 requestConfirmations, uint64 subId, uint256 seed)
         external
         payable
         returns (bytes32 requestId);
-    
+
     function getRandomnessThenDrawTickects(
         uint32 totalNumber,
         uint32 winnerNumber,
