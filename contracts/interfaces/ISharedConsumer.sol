@@ -3,7 +3,7 @@ pragma solidity ^0.8.18;
 
 import {IRequestTypeBase} from "./IRequestTypeBase.sol";
 
-interface ISharedComsumer {
+interface ISharedConsumer {
     struct RequestData {
         PlayType playType;
         bytes param;

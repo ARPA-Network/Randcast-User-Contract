@@ -9,7 +9,7 @@ import {IAdapter} from "../interfaces/IAdapter.sol";
 // solhint-disable-next-line no-global-import
 import "./RandcastSDK.sol" as RandcastSDK;
 
-contract SharedComsumerContract is
+contract SharedConsumerContract is
     RequestIdBase,
     BasicRandcastConsumerBase,
     UUPSUpgradeable,
