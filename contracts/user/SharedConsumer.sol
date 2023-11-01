@@ -9,21 +9,18 @@ import {IAdapter} from "../interfaces/IAdapter.sol";
 // solhint-disable-next-line no-global-import
 import "./RandcastSDK.sol" as RandcastSDK;
 
-contract SharedConsumerContract is
-    RequestIdBase,
-    BasicRandcastConsumerBase,
-    UUPSUpgradeable,
-    OwnableUpgradeable
-{
+contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
     // To be update
-    uint32 private constant DRAW_CALLBACK_GAS_BASE = 1200000;
-    uint32 private constant ROLL_CALLBACK_GAS_BASE = 1000000;
-    uint32 private constant FEE_OVERHEAD = 1000000;
+    uint32 private constant DRAW_CALLBACK_GAS_BASE = 100000;
+    uint32 private constant ROLL_CALLBACK_GAS_BASE = 120000;
+    uint32 private constant DRAW_CALLBACK_CALC_FACTOR = 600;
+    uint32 private constant ROLL_CALLBACK_CALC_FACTOR = 1000;
+    uint32 private constant FEE_OVERHEAD = 750000;
     uint32 private constant GROUP_SIZE = 3;
     uint32 private constant MAX_GAS_LIMIT = 2000000;
 
     // common subId for trial
-    uint64 trialSubId;
+    uint64 private trialSubId;
 
     mapping(address => uint64) public userSubIds;
 
@@ -34,15 +31,31 @@ contract SharedConsumerContract is
         bytes param;
     }
 
+    struct Subscription {
+        uint256 balance;
+        uint256 inflightCost;
+        uint64 reqCount;
+        uint64 freeRequestCount;
+        uint64 reqCountInCurrentPeriod;
+        uint256 lastRequestTimestamp;
+    }
+
+    struct FeeConfig {
+        uint16 flatFeePromotionGlobalPercentage;
+        bool isFlatFeePromotionEnabledPermanently;
+        uint256 flatFeePromotionStartTimestamp;
+        uint256 flatFeePromotionEndTimestamp;
+    }
+
     enum PlayType {
         Draw,
         Roll
     }
 
     event RollDiceRequest(
-        address user,
-        uint64 subId,
-        bytes32 requestId,
+        address indexed user,
+        uint64 indexed subId,
+        bytes32 indexed requestId,
         uint32 bunch,
         uint32 size,
         uint256 paidAmount,
@@ -51,9 +64,9 @@ contract SharedConsumerContract is
     );
 
     event DrawTicketsRequest(
-        address user,
-        uint64 subId,
-        bytes32 requestId,
+        address indexed user,
+        uint64 indexed subId,
+        bytes32 indexed requestId,
         uint32 totalNumber,
         uint32 winnerNumber,
         uint256 paidAmount,
@@ -61,9 +74,10 @@ contract SharedConsumerContract is
         uint16 requestConfirmations
     );
 
-    event RollDiceResult(bytes32 requestId, uint256[] result);
-    event DrawTicketsResult(bytes32 requestId, uint256[] result);
+    event RollDiceResult(bytes32 indexed requestId, uint256[] result);
+    event DrawTicketsResult(bytes32 indexed requestId, uint256[] result);
 
+    error InvalidParameters();
     error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
     error InvalidSubId();
     error GasLimitTooBig(uint256 have, uint32 want);
@@ -77,53 +91,14 @@ contract SharedConsumerContract is
         __Ownable_init(msg.sender);
     }
     // solhint-disable-next-line no-empty-blocks
+
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    function _fundSubId(PlayType playType, uint64 subId, bytes memory params) internal returns (uint64) {
-        if (subId == trialSubId) {
-            return subId;
-        }
-        if (subId == 0) {
-            subId = userSubIds[msg.sender];
-            if (subId == 0) {
-                subId = IAdapter(adapter).createSubscription();
-                IAdapter(adapter).addConsumer(subId, address(this));
-                userSubIds[msg.sender] = subId;
-            }
-        }
-        uint256 fundAmount = estimateFee(playType, subId, params);
-        if (msg.value < fundAmount) {
-            revert InsufficientFund({fundAmount: fundAmount, requiredAmount: msg.value});
-        }
-        if (fundAmount == 0) {
-            return subId;
-        }
-        IAdapter(adapter).fundSubscription{value: msg.value}(subId);
-        return subId;
-    }
-
-    struct Subscription {
-        uint256 balance;
-        uint256 inflightCost;
-        uint64 reqCount;
-        uint64 freeRequestCount;
-        uint64 reqCountInCurrentPeriod;
-        uint256 lastRequestTimestamp;
-    }
-    function _getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
-        (
-            ,
-            ,
-            sub.balance,
-            sub.inflightCost,
-            sub.reqCount,
-            sub.freeRequestCount,
-            ,
-            sub.reqCountInCurrentPeriod,
-            sub.lastRequestTimestamp
-        ) = IAdapter(adapter).getSubscription(subId);
-    }
-    function estimateFee(PlayType playType, uint64 subId, bytes memory params) public view returns (uint256 requestFee) {
+    function estimateFee(PlayType playType, uint64 subId, bytes memory params)
+        public
+        view
+        returns (uint256 requestFee)
+    {
         uint32 callbackGasLimit = _calculateGasLimit(playType, params);
         if (subId == 0) {
             subId = userSubIds[msg.sender];
@@ -144,6 +119,125 @@ contract SharedConsumerContract is
         );
         return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
     }
+
+    function rollDice(uint32 bunch, uint32 size, uint64 subId, uint256 seed, uint16 requestConfirmations)
+        external
+        payable
+        returns (bytes32 requestId)
+    {
+        if (bunch == 0 || size == 0) {
+            revert InvalidParameters();
+        }
+        bytes memory requestParams = abi.encode(bunch, size);
+        uint32 gasLimit = _calculateGasLimit(PlayType.Roll, requestParams);
+        if (gasLimit > MAX_GAS_LIMIT) {
+            revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
+        }
+        if (requestConfirmations == 0) {
+            (requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
+        }
+        subId = _fundSubId(PlayType.Roll, subId, requestParams);
+        bytes memory params;
+        params = abi.encode(bunch);
+        requestId = _rawRequestRandomness(
+            RequestType.RandomWords, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
+        );
+        pendingRequests[requestId] = RequestData(PlayType.Roll, requestParams);
+        emit RollDiceRequest(msg.sender, subId, requestId, bunch, size, msg.value, seed, requestConfirmations);
+    }
+
+    function drawTickets(
+        uint32 totalNumber,
+        uint32 winnerNumber,
+        uint64 subId,
+        uint256 seed,
+        uint16 requestConfirmations
+    ) external payable returns (bytes32 requestId) {
+        if (totalNumber < winnerNumber || totalNumber == 0 || winnerNumber == 0) {
+            revert InvalidParameters();
+        }
+        bytes memory requestParams = abi.encode(totalNumber, winnerNumber);
+        uint32 gasLimit = _calculateGasLimit(PlayType.Draw, requestParams);
+
+        if (gasLimit > MAX_GAS_LIMIT) {
+            revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
+        }
+        if (requestConfirmations == 0) {
+            (requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
+        }
+        subId = _fundSubId(PlayType.Draw, subId, requestParams);
+        bytes memory params;
+        requestId = _rawRequestRandomness(
+            RequestType.Randomness, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
+        );
+        pendingRequests[requestId] = RequestData(PlayType.Draw, requestParams);
+        emit DrawTicketsRequest(
+            msg.sender, subId, requestId, totalNumber, winnerNumber, msg.value, seed, requestConfirmations
+        );
+    }
+
+    function _fundSubId(PlayType playType, uint64 subId, bytes memory params) internal returns (uint64) {
+        if (subId == trialSubId) {
+            return subId;
+        }
+        if (subId == 0) {
+            subId = userSubIds[msg.sender];
+            if (subId == 0) {
+                subId = IAdapter(adapter).createSubscription();
+                IAdapter(adapter).addConsumer(subId, address(this));
+                userSubIds[msg.sender] = subId;
+            }
+        }
+        uint256 requiredAmount = estimateFee(playType, subId, params);
+        if (msg.value < requiredAmount) {
+            revert InsufficientFund({fundAmount: msg.value, requiredAmount: requiredAmount});
+        }
+        if (requiredAmount == 0) {
+            return subId;
+        }
+        IAdapter(adapter).fundSubscription{value: msg.value}(subId);
+        return subId;
+    }
+
+    function _getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
+        (
+            ,
+            ,
+            sub.balance,
+            sub.inflightCost,
+            sub.reqCount,
+            sub.freeRequestCount,
+            ,
+            sub.reqCountInCurrentPeriod,
+            sub.lastRequestTimestamp
+        ) = IAdapter(adapter).getSubscription(subId);
+    }
+
+    function _getFlatFeeConfig() internal view returns (FeeConfig memory feeConfig) {
+        {
+            (, bytes memory point) =
+            // solhint-disable-next-line avoid-low-level-calls
+             address(adapter).staticcall(abi.encodeWithSelector(IAdapter.getFlatFeeConfig.selector));
+            uint16 flatFeePromotionGlobalPercentage;
+            bool isFlatFeePromotionEnabledPermanently;
+            uint256 flatFeePromotionStartTimestamp;
+            uint256 flatFeePromotionEndTimestamp;
+            // solhint-disable-next-line no-inline-assembly
+            assembly {
+                flatFeePromotionGlobalPercentage := mload(add(point, 320))
+                isFlatFeePromotionEnabledPermanently := mload(add(point, 352))
+                flatFeePromotionStartTimestamp := mload(add(point, 384))
+                flatFeePromotionEndTimestamp := mload(add(point, 416))
+            }
+            feeConfig = FeeConfig(
+                flatFeePromotionGlobalPercentage,
+                isFlatFeePromotionEnabledPermanently,
+                flatFeePromotionStartTimestamp,
+                flatFeePromotionEndTimestamp
+            );
+        }
+    }
+
     function _calculateTierFee(uint64 reqCount, uint256 lastRequestTimestamp, uint64 reqCountInCurrentPeriod)
         internal
         view
@@ -173,93 +267,11 @@ contract SharedConsumerContract is
     function _calculateGasLimit(PlayType playType, bytes memory params) internal pure returns (uint32 gasLimit) {
         if (playType == PlayType.Draw) {
             (uint32 totalNumber, uint32 winnerNumber) = abi.decode(params, (uint32, uint32));
-            gasLimit = DRAW_CALLBACK_GAS_BASE + (totalNumber + winnerNumber) * 100;
+            gasLimit = DRAW_CALLBACK_GAS_BASE + (totalNumber + winnerNumber) * DRAW_CALLBACK_CALC_FACTOR;
         } else if (playType == PlayType.Roll) {
-            (uint32 bunch, ) = abi.decode(params, (uint32, uint32));
-            gasLimit = ROLL_CALLBACK_GAS_BASE + bunch * 100;
+            (uint32 bunch,) = abi.decode(params, (uint32, uint32));
+            gasLimit = ROLL_CALLBACK_GAS_BASE + bunch * ROLL_CALLBACK_CALC_FACTOR;
         }
-    }
-
-    struct FeeConfig {
-        uint16 flatFeePromotionGlobalPercentage;
-        bool isFlatFeePromotionEnabledPermanently;
-        uint256 flatFeePromotionStartTimestamp;
-        uint256 flatFeePromotionEndTimestamp;
-    }
-
-    function _getFlatFeeConfig() internal view returns (FeeConfig memory feeConfig) {
-        {
-            (, bytes memory point) =
-            // solhint-disable-next-line avoid-low-level-calls
-             address(adapter).staticcall(abi.encodeWithSelector(IAdapter.getFlatFeeConfig.selector));
-            uint16 flatFeePromotionGlobalPercentage;
-            bool isFlatFeePromotionEnabledPermanently;
-            uint256 flatFeePromotionStartTimestamp;
-            uint256 flatFeePromotionEndTimestamp;
-            // solhint-disable-next-line no-inline-assembly
-            assembly {
-                flatFeePromotionGlobalPercentage := mload(add(point, 320))
-                isFlatFeePromotionEnabledPermanently := mload(add(point, 352))
-                flatFeePromotionStartTimestamp := mload(add(point, 384))
-                flatFeePromotionEndTimestamp := mload(add(point, 416))
-            }
-            feeConfig = FeeConfig(
-                flatFeePromotionGlobalPercentage,
-                isFlatFeePromotionEnabledPermanently,
-                flatFeePromotionStartTimestamp,
-                flatFeePromotionEndTimestamp
-            );
-        }
-    }
-
-    function rollDice(uint32 bunch, uint32 size, uint64 subId, uint256 seed, uint16 requestConfirmations)
-        external
-        payable
-        returns (bytes32 requestId)
-    {
-        bytes memory calcParams = abi.encode(bunch, size);
-        uint32 gasLimit = _calculateGasLimit(PlayType.Roll, calcParams);
-        if (gasLimit > MAX_GAS_LIMIT) {
-            revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
-        }
-        if (requestConfirmations == 0) {
-            (requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
-        }
-        subId = _fundSubId(PlayType.Roll, subId, calcParams);
-        bytes memory params;
-        params = abi.encode(bunch);
-        requestId = _rawRequestRandomness(
-            RequestType.RandomWords, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
-        );
-        emit RollDiceRequest(msg.sender, subId, requestId, bunch, size, msg.value, seed, requestConfirmations);
-        pendingRequests[requestId] = RequestData(PlayType.Roll, calcParams);
-    }
-
-    function drawTickets(
-        uint32 totalNumber,
-        uint32 winnerNumber,
-        uint64 subId,
-        uint256 seed,
-        uint16 requestConfirmations
-    ) external payable returns (bytes32 requestId) {
-        bytes memory calcParams = abi.encode(totalNumber, winnerNumber);
-        uint32 gasLimit = _calculateGasLimit(PlayType.Draw, calcParams);
-        
-        if (gasLimit > MAX_GAS_LIMIT) {
-            revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
-        }
-        if (requestConfirmations == 0) {
-            (requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
-        }
-        subId = _fundSubId(PlayType.Draw, subId, calcParams);
-        bytes memory params;
-        requestId = _rawRequestRandomness(
-            RequestType.Randomness, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
-        );
-        emit DrawTicketsRequest(
-            msg.sender, subId, requestId, totalNumber, winnerNumber, msg.value, seed, requestConfirmations
-        );
-        pendingRequests[requestId] = RequestData(PlayType.Draw, calcParams);
     }
 
     /**
@@ -273,8 +285,8 @@ contract SharedConsumerContract is
             for (uint32 i = 0; i < randomWords.length; i++) {
                 diceResults[i] = RandcastSDK.roll(randomWords[i], size) + 1;
             }
-            emit RollDiceResult(requestId, diceResults);
             delete pendingRequests[requestId];
+            emit RollDiceResult(requestId, diceResults);
         }
     }
 
@@ -284,15 +296,16 @@ contract SharedConsumerContract is
 
     function _fulfillRandomness(bytes32 requestId, uint256 randomness) internal override {
         RequestData memory requestData = pendingRequests[requestId];
-        (uint32 totalNumber, uint32 winnerNumber) = abi.decode(requestData.param, (uint32, uint32));
-        uint256[] memory tickets = new uint256[](totalNumber);
-        uint256[] memory winnerResults;
-        for (uint32 i = 0; i < totalNumber; i++) {
-            tickets[i] = i;
+        if (requestData.playType == PlayType.Draw) {
+            (uint32 totalNumber, uint32 winnerNumber) = abi.decode(requestData.param, (uint32, uint32));
+            uint256[] memory tickets = new uint256[](totalNumber);
+            for (uint32 i = 0; i < totalNumber; i++) {
+                tickets[i] = i;
+            }
+            uint256[] memory winnerResults = RandcastSDK.draw(randomness, tickets, winnerNumber);
+            delete pendingRequests[requestId];
+            emit DrawTicketsResult(requestId, winnerResults);
         }
-        winnerResults = RandcastSDK.draw(randomness, tickets, winnerNumber);
-        emit DrawTicketsResult(requestId, winnerResults);
-        delete pendingRequests[requestId];
     }
 
     function cancelSubscription() external {

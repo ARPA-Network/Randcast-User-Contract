@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
-import {IRequestTypeBase} from "./IRequestTypeBase.sol";
-
 interface ISharedConsumer {
     struct RequestData {
         PlayType playType;
@@ -13,35 +11,6 @@ interface ISharedConsumer {
         Draw,
         Roll
     }
-
-    event RollDiceRequest(
-        address user,
-        uint64 subId,
-        bytes32 requestId,
-        uint32 bunch,
-        uint32 size,
-        uint256 paidAmount,
-        uint256 seed,
-        uint16 requestConfirmations
-    );
-
-    event DrawTicketsRequest(
-        address user,
-        uint64 subId,
-        bytes32 requestId,
-        uint32 totalNumber,
-        uint32 winnerNumber,
-        uint256 paidAmount,
-        uint256 seed,
-        uint16 requestConfirmations
-    );
-
-    event RollDiceResult(bytes32 requestId, uint256[] result);
-    event DrawTicketsResult(bytes32 requestId, uint256[] result);
-
-    error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
-    error InvalidSubId();
-    error GasLimitTooBig(uint256 have, uint32 want);
 
     function estimateFee(PlayType playType, uint64 subId, bytes memory params)
         external
