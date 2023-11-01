@@ -34,6 +34,7 @@ abstract contract GeneralRandcastConsumerBase is
     uint16 public requestConfirmations;
 
     error GasLimitTooBig(uint256 have, uint32 want);
+    error NoSubscriptionBound();
 
     function setCallbackGasConfig(uint32 _callbackGasLimit, uint256 _callbackMaxGasFee) external onlyOwner {
         if (_callbackGasLimit > _MAX_GAS_LIMIT) {
@@ -52,6 +53,9 @@ abstract contract GeneralRandcastConsumerBase is
         // (1) the subscription id that the last addConsumer to
         // (2) the subscription id that the last requestRandomness used
         uint64 subId = IAdapter(adapter).getLastSubscription(address(this));
+        if (subId == 0) {
+            revert NoSubscriptionBound();
+        }
         // Only in the first place we calculate the callbackGasLimit, then next time we directly use it to request randomness.
         if (callbackGasLimit == 0) {
             uint256 gasUsed = _dryRunCallbackToEstimateGas(requestType, params, subId);
@@ -72,14 +76,22 @@ abstract contract GeneralRandcastConsumerBase is
         );
     }
 
+    function _nextRequestId(uint64 subId) internal view returns (bytes32) {
+        subId = subId == 0 ? IAdapter(adapter).getLastSubscription(address(this)) : subId;
+        if (subId == 0) {
+            revert NoSubscriptionBound();
+        }
+        uint256 rawSeed = _makeRandcastInputSeed(_USER_SEED_PLACEHOLDER, subId, address(this), getNonce(subId));
+        return _makeRequestId(rawSeed);
+    }
+
     function _dryRunCallbackToEstimateGas(RequestType requestType, bytes memory params, uint64 subId)
         internal
         isDryRun
         returns (uint256)
     {
-        uint256 rawSeed = _makeRandcastInputSeed(_USER_SEED_PLACEHOLDER, subId, msg.sender, getNonce(subId));
         // This should be identical to adapter generated requestId.
-        bytes32 requestId = _makeRequestId(rawSeed);
+        bytes32 requestId = _nextRequestId(subId);
         // Prepares the message call of callback function according to request type
         bytes memory data;
         if (requestType == RequestType.Randomness) {

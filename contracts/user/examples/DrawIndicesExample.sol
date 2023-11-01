@@ -9,7 +9,7 @@ contract DrawIndicesExample is GeneralRandcastConsumerBase {
     mapping(bytes32 => bytes) public drawRequests;
     mapping(bytes32 => uint256[]) public winningResults;
 
-    event DrawIndicesRequest(bytes32 indexed requestId, uint32 totalSize, uint32 winningSize);
+    event DrawIndicesRequest(bytes32 indexed requestId, address indexed sender, uint32 totalSize, uint32 winningSize);
     event DrawIndicesResult(bytes32 indexed requestId, uint256[] winningResults);
 
     error TotalSizeMustBeGreaterThanOrEqualToWinningSize();
@@ -29,13 +29,14 @@ contract DrawIndicesExample is GeneralRandcastConsumerBase {
             revert WinningSizeMustBeGreaterThanZero();
         }
 
-        bytes memory params;
-        requestId = _requestRandomness(RequestType.Randomness, params);
-
+        requestId = _nextRequestId(0);
         bytes memory requestParams = abi.encode(totalSize, winningSize);
         drawRequests[requestId] = requestParams;
 
-        emit DrawIndicesRequest(requestId, totalSize, winningSize);
+        emit DrawIndicesRequest(requestId, msg.sender, totalSize, winningSize);
+
+        bytes memory params;
+        _requestRandomness(RequestType.Randomness, params);
     }
 
     /**
