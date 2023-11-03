@@ -11,8 +11,8 @@ import "./RandcastSDK.sol" as RandcastSDK;
 
 contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
 
-    uint32 private constant DRAW_CALLBACK_GAS_BASE = 100000;
-    uint32 private constant ROLL_CALLBACK_GAS_BASE = 120000;
+    uint32 private constant DRAW_CALLBACK_GAS_BASE = 8000;
+    uint32 private constant ROLL_CALLBACK_GAS_BASE = 7200;
     uint32 private constant DRAW_CALLBACK_TOTAL_FACTOR = 371;
     uint32 private constant DRAW_CALLBACK_WINNER_FACTOR = 868;
     uint32 private constant ROLL_CALLBACK_BUNCH_FACTOR = 700;
@@ -128,7 +128,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         payable
         returns (bytes32 requestId)
     {
-        if (totalNumber > 1000 || totalNumber < winnerNumber || totalNumber == 0 || winnerNumber == 0) {
+        if (bunch > 100 || bunch == 0 || size == 0) {
             revert InvalidParameters();
         }
         bytes memory requestParams = abi.encode(bunch, size);
