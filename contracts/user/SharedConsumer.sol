@@ -10,12 +10,14 @@ import {IAdapter} from "../interfaces/IAdapter.sol";
 import "./RandcastSDK.sol" as RandcastSDK;
 
 contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
-    // To be update
+
     uint32 private constant DRAW_CALLBACK_GAS_BASE = 100000;
     uint32 private constant ROLL_CALLBACK_GAS_BASE = 120000;
-    uint32 private constant DRAW_CALLBACK_CALC_FACTOR = 600;
-    uint32 private constant ROLL_CALLBACK_CALC_FACTOR = 1000;
-    uint32 private constant FEE_OVERHEAD = 750000;
+    uint32 private constant DRAW_CALLBACK_TOTAL_FACTOR = 371;
+    uint32 private constant DRAW_CALLBACK_WINNER_FACTOR = 868;
+    uint32 private constant ROLL_CALLBACK_BUNCH_FACTOR = 700;
+    uint32 private constant FEE_OVERHEAD = 550000;
+    uint32 private constant FEE_OVERHEAD_FACTOR = 500;
     uint32 private constant GROUP_SIZE = 3;
     uint32 private constant MAX_GAS_LIMIT = 2000000;
 
@@ -100,11 +102,12 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         returns (uint256 requestFee)
     {
         uint32 callbackGasLimit = _calculateGasLimit(playType, params);
+        uint32 overhead = _calculateFeeOverhead(playType, params);
         if (subId == 0) {
             subId = userSubIds[msg.sender];
             if (subId == 0) {
                 return IAdapter(adapter).estimatePaymentAmountInETH(
-                    callbackGasLimit, FEE_OVERHEAD, 0, tx.gasprice * 3, GROUP_SIZE
+                    callbackGasLimit, overhead, 0, tx.gasprice * 3, GROUP_SIZE
                 );
             }
         }
@@ -115,7 +118,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
             tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
         }
         uint256 estimatedFee = IAdapter(adapter).estimatePaymentAmountInETH(
-            callbackGasLimit, FEE_OVERHEAD, tierFee, tx.gasprice * 3, GROUP_SIZE
+            callbackGasLimit, overhead, tierFee, tx.gasprice * 3, GROUP_SIZE
         );
         return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
     }
@@ -174,6 +177,23 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         emit DrawTicketsRequest(
             msg.sender, subId, requestId, totalNumber, winnerNumber, msg.value, seed, requestConfirmations
         );
+    }
+
+    function cancelSubscription() external {
+        uint64 subId = userSubIds[msg.sender];
+        if (subId == 0) {
+            return;
+        }
+        IAdapter(adapter).cancelSubscription(subId, msg.sender);
+        delete userSubIds[msg.sender];
+    }
+
+    function setTrialSubscription(uint64 _trialSubId) external onlyOwner {
+        trialSubId = _trialSubId;
+    }
+
+    function getTrialSubscription() external view returns (uint64) {
+        return trialSubId;
     }
 
     function _fundSubId(PlayType playType, uint64 subId, bytes memory params) internal returns (uint64) {
@@ -267,13 +287,22 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
     function _calculateGasLimit(PlayType playType, bytes memory params) internal pure returns (uint32 gasLimit) {
         if (playType == PlayType.Draw) {
             (uint32 totalNumber, uint32 winnerNumber) = abi.decode(params, (uint32, uint32));
-            gasLimit = DRAW_CALLBACK_GAS_BASE + (totalNumber + winnerNumber) * DRAW_CALLBACK_CALC_FACTOR;
+            gasLimit = (DRAW_CALLBACK_GAS_BASE + totalNumber *
+                DRAW_CALLBACK_TOTAL_FACTOR + winnerNumber * DRAW_CALLBACK_WINNER_FACTOR) * 4 / 3;
         } else if (playType == PlayType.Roll) {
             (uint32 bunch,) = abi.decode(params, (uint32, uint32));
-            gasLimit = ROLL_CALLBACK_GAS_BASE + bunch * ROLL_CALLBACK_CALC_FACTOR;
+            gasLimit = (ROLL_CALLBACK_GAS_BASE + bunch * ROLL_CALLBACK_BUNCH_FACTOR) * 4 / 3;
         }
     }
-
+    
+    function _calculateFeeOverhead(PlayType playType, bytes memory params) internal pure returns (uint32 overhead) {
+        if (playType == PlayType.Draw) {
+            overhead = FEE_OVERHEAD * 4 / 3;
+        } else if (playType == PlayType.Roll) {
+            (uint32 bunch, ) = abi.decode(params, (uint32, uint32));
+            overhead = (FEE_OVERHEAD + bunch * FEE_OVERHEAD_FACTOR) * 4 / 3;
+        }
+    }
     /**
      * Callback function used by Randcast Adapter to generate a sets of dice result
      */
@@ -306,22 +335,5 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
             delete pendingRequests[requestId];
             emit DrawTicketsResult(requestId, winnerResults);
         }
-    }
-
-    function cancelSubscription() external {
-        uint64 subId = userSubIds[msg.sender];
-        if (subId == 0) {
-            return;
-        }
-        IAdapter(adapter).cancelSubscription(subId, msg.sender);
-        delete userSubIds[msg.sender];
-    }
-
-    function setTrialSubscription(uint64 _trialSubId) external onlyOwner {
-        trialSubId = _trialSubId;
-    }
-
-    function getTrialSubscription() external view returns (uint64) {
-        return trialSubId;
     }
 }

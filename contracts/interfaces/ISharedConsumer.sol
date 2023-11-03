@@ -2,11 +2,6 @@
 pragma solidity ^0.8.18;
 
 interface ISharedConsumer {
-    struct RequestData {
-        PlayType playType;
-        bytes param;
-    }
-
     enum PlayType {
         Draw,
         Roll
