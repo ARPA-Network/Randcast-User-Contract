@@ -12,15 +12,25 @@ contract DrawLotteryExample is GeneralRandcastConsumerBase {
     uint32 public ticketNumber;
     uint32 public winnerNumber;
 
+    event LotteryTicketGenerated(uint256[] ticketResults);
+
+    error TicketNumberMustBeGreaterThanOrEqualToWinnerNumber();
+    error WinnerNumberMustBeGreaterThanZero();
+
     // solhint-disable-next-line no-empty-blocks
     constructor(address adapter) BasicRandcastConsumerBase(adapter) {}
 
-    event LotteryTicketGenerated(uint256[] ticketResults);
     /**
      * Requests randomness
      */
 
     function getTickets(uint32 ticketNum, uint32 winnerNum) external returns (bytes32) {
+        if (ticketNum < winnerNum) {
+            revert TicketNumberMustBeGreaterThanOrEqualToWinnerNumber();
+        }
+        if (winnerNum == 0) {
+            revert WinnerNumberMustBeGreaterThanZero();
+        }
         ticketNumber = ticketNum;
         winnerNumber = winnerNum;
         bytes memory params = abi.encode(ticketNumber);
