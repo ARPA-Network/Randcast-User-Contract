@@ -128,7 +128,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         payable
         returns (bytes32 requestId)
     {
-        if (bunch == 0 || size == 0) {
+        if (totalNumber > 1000 || totalNumber < winnerNumber || totalNumber == 0 || winnerNumber == 0) {
             revert InvalidParameters();
         }
         bytes memory requestParams = abi.encode(bunch, size);
