@@ -156,7 +156,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         uint256 seed,
         uint16 requestConfirmations
     ) external payable returns (bytes32 requestId) {
-        if (totalNumber < winnerNumber || totalNumber == 0 || winnerNumber == 0) {
+        if (totalNumber > 1000 || totalNumber < winnerNumber || totalNumber == 0 || winnerNumber == 0) {
             revert InvalidParameters();
         }
         bytes memory requestParams = abi.encode(totalNumber, winnerNumber);
