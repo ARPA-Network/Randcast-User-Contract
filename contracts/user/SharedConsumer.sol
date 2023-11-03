@@ -11,8 +11,8 @@ import "./RandcastSDK.sol" as RandcastSDK;
 
 contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
 
-    uint32 private constant DRAW_CALLBACK_GAS_BASE = 100000;
-    uint32 private constant ROLL_CALLBACK_GAS_BASE = 120000;
+    uint32 private constant DRAW_CALLBACK_GAS_BASE = 8000;
+    uint32 private constant ROLL_CALLBACK_GAS_BASE = 7200;
     uint32 private constant DRAW_CALLBACK_TOTAL_FACTOR = 371;
     uint32 private constant DRAW_CALLBACK_WINNER_FACTOR = 868;
     uint32 private constant ROLL_CALLBACK_BUNCH_FACTOR = 700;
