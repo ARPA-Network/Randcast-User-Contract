@@ -11,8 +11,8 @@ import "./RandcastSDK.sol" as RandcastSDK;
 
 contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
 
-    uint32 private constant DRAW_CALLBACK_GAS_BASE = 8000;
-    uint32 private constant ROLL_CALLBACK_GAS_BASE = 7200;
+    uint32 private constant DRAW_CALLBACK_GAS_BASE = 40000;
+    uint32 private constant ROLL_CALLBACK_GAS_BASE = 36000;
     uint32 private constant DRAW_CALLBACK_TOTAL_FACTOR = 371;
     uint32 private constant DRAW_CALLBACK_WINNER_FACTOR = 868;
     uint32 private constant ROLL_CALLBACK_BUNCH_FACTOR = 700;
@@ -90,7 +90,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
     }
 
     function initialize() public initializer {
-        __Ownable_init(msg.sender);
+        __Ownable_init();
     }
     // solhint-disable-next-line no-empty-blocks
 
