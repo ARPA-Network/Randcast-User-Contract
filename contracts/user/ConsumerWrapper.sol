@@ -6,18 +6,18 @@ import {UUPSUpgradeable} from "openzeppelin-contracts-upgradeable/contracts/prox
 import {BasicRandcastConsumerBase} from "./BasicRandcastConsumerBase.sol";
 import {RequestIdBase} from "../utils/RequestIdBase.sol";
 import {IAdapter} from "../interfaces/IAdapter.sol";
-import {IRandcastSys} from "../interfaces/IMUDRandcastSys.sol";
 // solhint-disable-next-line no-global-import
 
-contract MUDConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
+contract ConsumerWrapper is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
 
-    uint32 private constant _FEE_OVERHEAD = 550000;
+    uint32 private constant _FEE_OVERHEAD = 700000;
     uint32 private constant _GROUP_SIZE = 3;
     uint32 private constant _MAX_GAS_LIMIT = 2000000;
 
     struct RequestData {
         bytes32 entityId;
-        address callBackAddress;
+        address callbackAddress;
+        bytes4 callbackFunctionSelector;
     }
 
     struct Subscription {
@@ -47,6 +47,7 @@ contract MUDConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeabl
     error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
     error InvalidSubId();
     error GasLimitTooBig(uint256 have, uint32 want);
+    error CallbackFailed(bytes32 requestId);
 
     mapping(address => uint64) public userSubIds;
     mapping(bytes32 => RequestData) public pendingRequests;
@@ -184,8 +185,13 @@ contract MUDConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeabl
         return IAdapter(adapter).getFeeTier(reqCountCalc) * feeConfig.flatFeePromotionGlobalPercentage / 100;
     }
 
-    function getRandomNumber(uint64 subId, bytes32 entityId, address callBackAddress, uint32 gasLimit)
-        external payable
+    function getRandomNumber(
+        uint64 subId,
+        bytes32 entityId,
+        uint32 gasLimit,
+        address callbackAddress,
+        bytes4 callbackFunctionSelector)
+        external payable returns (bytes32 requestId)
     {
         if (gasLimit > _MAX_GAS_LIMIT) {
             revert GasLimitTooBig(gasLimit, _MAX_GAS_LIMIT);
@@ -193,20 +199,34 @@ contract MUDConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeabl
         subId = _fundSubId(subId, gasLimit);
         (uint16 requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
         bytes memory params;
-        bytes32 requestId = _rawRequestRandomness(
+        requestId = _rawRequestRandomness(
             RequestType.Randomness, params, subId, 0, requestConfirmations, gasLimit, tx.gasprice * 3
         );
         pendingRequests[requestId] = RequestData({
             entityId: entityId,
-            callBackAddress: callBackAddress
+            callbackAddress: callbackAddress,
+            callbackFunctionSelector: callbackFunctionSelector // Store the selector in the request data
         });
-        emit RandomNumberRequest(callBackAddress, requestId, entityId);
+        emit RandomNumberRequest(callbackAddress, requestId, entityId);
     }
 
+    // Modify the _fulfillRandomness function to use the stored callback function selector
     function _fulfillRandomness(bytes32 requestId, uint256 randomness) internal override {
         RequestData memory requestData = pendingRequests[requestId];
-        IRandcastSys(requestData.callBackAddress).fulfillRandomness(requestId, randomness, requestData.entityId);
+        // Using the callbackFunctionSelector to call the function on the requesting contract
+        (bool success,) = requestData.callbackAddress.call(
+            abi.encodeWithSelector(
+                requestData.callbackFunctionSelector,
+                requestId,
+                randomness,
+                requestData.entityId
+            )
+        );
+        if (!success) {
+            revert CallbackFailed(requestId);
+        }
         delete pendingRequests[requestId];
         emit RandomNumberResult(requestId, randomness);
     }
+
 }
