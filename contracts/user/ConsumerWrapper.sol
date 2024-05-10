@@ -12,12 +12,16 @@ contract ConsumerWrapper is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrad
 
     uint32 private constant _FEE_OVERHEAD = 700000;
     uint32 private constant _GROUP_SIZE = 3;
-    uint32 private constant _MAX_GAS_LIMIT = 2000000;
+    uint32 private constant _RANDOMNESS_CALLBACK_GAS_BASE = 10000;
+    uint32 private constant _RANDOMWORDS_CALLBACK_GAS_BASE = 36000;
+    uint32 private constant _RANDOMWORDS_CALLBACK_BUNCH_FACTOR = 700;
+    uint32 private constant _SHUFFLE_CALLBACK_GAS_BASE = 36000;
+    uint32 private constant _SHUFFLE_CALLBACK_UPPER_FACTOR = 700;
+    uint32 private constant _FEE_OVERHEAD_FACTOR = 500;
 
     struct RequestData {
         bytes32 entityId;
         address callbackAddress;
-        bytes4 callbackFunctionSelector;
     }
 
     struct Subscription {
@@ -36,13 +40,28 @@ contract ConsumerWrapper is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrad
         uint256 flatFeePromotionEndTimestamp;
     }
     
-    event RandomNumberRequest(
+    event RandomnessRequest(
         address indexed user,
         bytes32 indexed requestId,
         bytes32 entityId
     );
+
+    event RandomWordsRequest(
+        address indexed user,
+        bytes32 indexed requestId,
+        bytes32 entityId,
+        uint32 size
+    );
+
+    event ShuffleArrayRequest(
+        address indexed user,
+        bytes32 indexed requestId,
+        bytes32 entityId,
+        uint32 upper
+    );
     
-    event RandomNumberResult(bytes32 indexed requestId, uint256 result);
+    event RandomnessResult(bytes32 indexed requestId, uint256 result, bool callBackSuccess);
+    event RandomWordsResult(bytes32 indexed requestId, uint256[] results, bool callBackSuccess);
     
     error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
     error InvalidSubId();
@@ -64,30 +83,71 @@ contract ConsumerWrapper is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrad
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    function estimateFee(uint64 subId, uint32 callbackGasLimit)
-        public
-        view
-        returns (uint256 requestFee)
+
+    function getRandomness(
+        uint64 subId,
+        bytes32 entityId,
+        uint32 callbackGasLimit,
+        address callbackAddress)
+        external payable returns (bytes32 requestId)
     {
-        uint32 overhead = _FEE_OVERHEAD;
-        if (subId == 0) {
-            subId = userSubIds[msg.sender];
-            if (subId == 0) {
-                return IAdapter(adapter).estimatePaymentAmountInETH(
-                    callbackGasLimit, overhead, 0, tx.gasprice * 3, _GROUP_SIZE
-                );
-            }
+        (uint16 requestConfirmations,uint32 maxGasLimit,,,,,) = IAdapter(adapter).getAdapterConfig();
+        if (callbackGasLimit > maxGasLimit) {
+            revert GasLimitTooBig(callbackGasLimit, maxGasLimit);
         }
-        // Get subscription details only if subId is not zero
-        Subscription memory sub = _getSubscription(subId);
-        uint32 tierFee;
-        if (sub.freeRequestCount == 0) {
-            tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
-        }
-        uint256 estimatedFee = IAdapter(adapter).estimatePaymentAmountInETH(
-            callbackGasLimit, overhead, tierFee, tx.gasprice * 3, _GROUP_SIZE
+        bytes memory params;
+        subId = _fundSubId(RequestType.Randomness, subId, params, callbackGasLimit);
+        requestId = _rawRequestRandomness(
+            RequestType.Randomness, params, subId, 0, requestConfirmations, callbackGasLimit, tx.gasprice * 3
         );
-        return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
+        pendingRequests[requestId] = RequestData({
+            entityId: entityId,
+            callbackAddress: callbackAddress
+        });
+        emit RandomnessRequest(msg.sender, requestId, entityId);
+    }
+
+
+    function getRandomWords(uint64 subId, bytes32 entityId, uint32 size, uint32 callbackGasLimit, address callbackAddress)
+        external
+        payable
+        returns (bytes32 requestId)
+    {
+        (uint16 requestConfirmations,uint32 maxGasLimit,,,,,) = IAdapter(adapter).getAdapterConfig();
+        if (callbackGasLimit > maxGasLimit) {
+            revert GasLimitTooBig(callbackGasLimit, maxGasLimit);
+        }
+        bytes memory requestParams = abi.encode(size);
+        subId = _fundSubId(RequestType.RandomWords, subId, requestParams, callbackGasLimit);
+        requestId = _rawRequestRandomness(
+            RequestType.RandomWords, requestParams, subId, 0, requestConfirmations, callbackGasLimit, tx.gasprice * 3
+        );
+        pendingRequests[requestId] = RequestData({
+            entityId: entityId,
+            callbackAddress: callbackAddress
+        });
+        emit RandomWordsRequest(msg.sender, requestId, entityId, size);
+    }
+
+    function getShuffleArray(uint64 subId, bytes32 entityId, uint32 upper, uint32 callbackGasLimit, address callbackAddress)
+        external
+        payable
+        returns (bytes32 requestId)
+    {
+        (uint16 requestConfirmations,uint32 maxGasLimit,,,,,) = IAdapter(adapter).getAdapterConfig();
+        if (callbackGasLimit > maxGasLimit) {
+            revert GasLimitTooBig(callbackGasLimit, maxGasLimit);
+        }
+        bytes memory params = abi.encode(upper);
+        subId = _fundSubId(RequestType.Shuffling, subId, params, callbackGasLimit);
+        requestId = _rawRequestRandomness(
+            RequestType.Shuffling, params, subId, 0, requestConfirmations, callbackGasLimit, tx.gasprice * 3
+        );
+        pendingRequests[requestId] = RequestData({
+            entityId: entityId,
+            callbackAddress: callbackAddress
+        });
+        emit ShuffleArrayRequest(msg.sender, requestId, entityId, upper);
     }
 
     function cancelSubscription() external {
@@ -99,7 +159,42 @@ contract ConsumerWrapper is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrad
         delete userSubIds[msg.sender];
     }
 
-    function _fundSubId(uint64 subId, uint32 callbackGasLimit) internal returns (uint64) {
+    function estimateFee(RequestType requestType, uint64 subId, bytes memory params, uint32 callbackGasLimit)
+        public
+        view
+        returns (uint256 requestFee)
+    {
+        uint32 totalGasLimit = _calculateGasLimit(requestType, params) + callbackGasLimit;
+        uint32 overhead = _calculateFeeOverhead(requestType, params);
+        if (subId == 0) {
+            subId = userSubIds[msg.sender];
+            if (subId == 0) {
+                return IAdapter(adapter).estimatePaymentAmountInETH(
+                    totalGasLimit, overhead, 0, tx.gasprice * 3, _GROUP_SIZE
+                );
+            }
+        }
+        // Get subscription details only if subId is not zero
+        Subscription memory sub = _getSubscription(subId);
+        uint32 tierFee;
+        if (sub.freeRequestCount == 0) {
+            tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
+        }
+        uint256 estimatedFee = IAdapter(adapter).estimatePaymentAmountInETH(
+            totalGasLimit, overhead, tierFee, tx.gasprice * 3, _GROUP_SIZE
+        );
+        return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
+    }
+
+    function getSubscription(address user) external view returns (Subscription memory sub) {
+        uint64 subId = userSubIds[user];
+        if (subId == 0) {
+            return sub;
+        }
+        return _getSubscription(subId);
+    }
+    
+    function _fundSubId(RequestType requestType, uint64 subId, bytes memory params, uint32 callbackGasLimit) internal returns (uint64) {
 
         if (subId == 0) {
             subId = userSubIds[msg.sender];
@@ -109,7 +204,7 @@ contract ConsumerWrapper is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrad
                 userSubIds[msg.sender] = subId;
             }
         }
-        uint256 requiredAmount = estimateFee(subId, callbackGasLimit);
+        uint256 requiredAmount = estimateFee(requestType, subId, params, callbackGasLimit);
         if (msg.value < requiredAmount) {
             revert InsufficientFund({fundAmount: msg.value, requiredAmount: requiredAmount});
         }
@@ -185,29 +280,28 @@ contract ConsumerWrapper is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrad
         return IAdapter(adapter).getFeeTier(reqCountCalc) * feeConfig.flatFeePromotionGlobalPercentage / 100;
     }
 
-    function getRandomNumber(
-        uint64 subId,
-        bytes32 entityId,
-        uint32 gasLimit,
-        address callbackAddress,
-        bytes4 callbackFunctionSelector)
-        external payable returns (bytes32 requestId)
-    {
-        if (gasLimit > _MAX_GAS_LIMIT) {
-            revert GasLimitTooBig(gasLimit, _MAX_GAS_LIMIT);
+    function _calculateGasLimit(RequestType requestType, bytes memory params) internal pure returns (uint32 gasLimit) {
+        if (requestType == RequestType.Randomness) {
+            gasLimit = _RANDOMNESS_CALLBACK_GAS_BASE;
+        } else if (requestType == RequestType.RandomWords) {
+            uint32 size = abi.decode(params, (uint32));
+            gasLimit = _RANDOMWORDS_CALLBACK_GAS_BASE + size * _RANDOMWORDS_CALLBACK_BUNCH_FACTOR;
+        } else if (requestType == RequestType.Shuffling) {
+            uint32 upper = abi.decode(params, (uint32));
+            gasLimit = _SHUFFLE_CALLBACK_GAS_BASE + upper * _SHUFFLE_CALLBACK_UPPER_FACTOR;
         }
-        subId = _fundSubId(subId, gasLimit);
-        (uint16 requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
-        bytes memory params;
-        requestId = _rawRequestRandomness(
-            RequestType.Randomness, params, subId, 0, requestConfirmations, gasLimit, tx.gasprice * 3
-        );
-        pendingRequests[requestId] = RequestData({
-            entityId: entityId,
-            callbackAddress: callbackAddress,
-            callbackFunctionSelector: callbackFunctionSelector // Store the selector in the request data
-        });
-        emit RandomNumberRequest(callbackAddress, requestId, entityId);
+    }
+    
+    function _calculateFeeOverhead(RequestType requestType, bytes memory params) internal pure returns (uint32 overhead) {
+        if (requestType == RequestType.Randomness) {
+            overhead = _FEE_OVERHEAD;
+        } else if (requestType == RequestType.RandomWords) {
+            uint32 size = abi.decode(params, (uint32));
+            overhead = (_FEE_OVERHEAD + size * _FEE_OVERHEAD_FACTOR) ;
+        } else if (requestType == RequestType.Shuffling) {
+            uint32 upper = abi.decode(params, (uint32));
+            overhead = (_FEE_OVERHEAD + upper * _FEE_OVERHEAD_FACTOR);
+        }
     }
 
     // Modify the _fulfillRandomness function to use the stored callback function selector
@@ -215,18 +309,41 @@ contract ConsumerWrapper is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrad
         RequestData memory requestData = pendingRequests[requestId];
         // Using the callbackFunctionSelector to call the function on the requesting contract
         (bool success,) = requestData.callbackAddress.call(
-            abi.encodeWithSelector(
-                requestData.callbackFunctionSelector,
+            abi.encodeWithSignature(
+                "fulfillRandomness(bytes32,bytes32,uint256)",
+                requestData.entityId,
                 requestId,
-                randomness,
-                requestData.entityId
-            )
+                randomness)
         );
-        if (!success) {
-            revert CallbackFailed(requestId);
-        }
         delete pendingRequests[requestId];
-        emit RandomNumberResult(requestId, randomness);
+        emit RandomnessResult(requestId, randomness, success);
     }
 
+    function _fulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) internal override {
+        RequestData memory requestData = pendingRequests[requestId];
+        // Using the callbackFunctionSelector to call the function on the requesting contract
+        (bool success,) = requestData.callbackAddress.call(
+            abi.encodeWithSignature(
+                "fulfillRandomWords(bytes32,bytes32,uint256[])",
+                requestData.entityId,
+                requestId,
+                randomWords)
+        );
+        delete pendingRequests[requestId];
+        emit RandomWordsResult(requestId, randomWords, success);
+    }
+
+    function _fulfillShuffledArray(bytes32 requestId, uint256[] memory shuffledArray) internal override {
+        RequestData memory requestData = pendingRequests[requestId];
+        // Using the callbackFunctionSelector to call the function on the requesting contract
+        (bool success,) = requestData.callbackAddress.call(
+            abi.encodeWithSignature(
+                "fulfillShuffledArray(bytes32,bytes32,uint256[])",
+                requestData.entityId,
+                requestId,
+                shuffledArray)
+        );
+        delete pendingRequests[requestId];
+        emit RandomWordsResult(requestId, shuffledArray, success);
+    }
 }
