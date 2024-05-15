@@ -18,18 +18,21 @@ contract DeployConsumerWrapperScript is Script {
     function run() external {
         vm.startBroadcast(_deployerPrivateKey);
         bytes32 implSalt = keccak256(abi.encode("ComsumerWrapper"));
-         // Deploy the ConsumerWrapper contract using Create2
-        ConsumerWrapper comsumerImpl = new ConsumerWrapper{salt: implSalt}(_adapterAddress);
-        console.log(address(comsumerImpl));
-
-        bytes memory proxyBytecode = abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(comsumerImpl, abi.encodeWithSignature("initialize()")));
+        // Deploy the ConsumerWrapper contract using Create2
+        ConsumerWrapper consumerImpl = new ConsumerWrapper{salt: implSalt}();
+        // comsumerImpl.setAdapterAddress(_adapterAddress);
+        console.log(address(consumerImpl));
 
         // Compute a new unique salt for the ERC1967Proxy contract
         bytes32 proxySalt = keccak256(abi.encodePacked("ComsumerWrapperProxy"));
 
         // Deploy the ERC1967Proxy contract using Create2
-        ERC1967Proxy porxy = new ERC1967Proxy{salt: proxySalt}(address(comsumerImpl),abi.encodeWithSignature("initialize()"));
+        bytes memory data;
+        ERC1967Proxy porxy = new ERC1967Proxy{salt: proxySalt}(address(consumerImpl), data);
         console.log(address(porxy));
+        address(porxy).call(abi.encodeWithSignature("initialize()"));
+        address(porxy).call(abi.encodeWithSignature("disableInitializers()"));
+        address(porxy).call(abi.encodeWithSignature("setAdapterAddress(address)", _adapterAddress));
         vm.stopBroadcast();
     }
 }
