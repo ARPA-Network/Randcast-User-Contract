@@ -16,13 +16,13 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
     uint32 private constant DRAW_CALLBACK_TOTAL_FACTOR = 371;
     uint32 private constant DRAW_CALLBACK_WINNER_FACTOR = 868;
     uint32 private constant ROLL_CALLBACK_BUNCH_FACTOR = 700;
-    uint32 private constant FEE_OVERHEAD = 550000;
+    uint32 private constant RANDOMNESS_REWARD_GAS = 9000;
     uint32 private constant FEE_OVERHEAD_FACTOR = 500;
-    uint32 private constant GROUP_SIZE = 3;
     uint32 private constant MAX_GAS_LIMIT = 2000000;
 
     // common subId for trial
     uint64 private trialSubId;
+    uint32 private groupSize = 5;
 
     mapping(address => uint64) public userSubIds;
 
@@ -107,7 +107,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
             subId = userSubIds[msg.sender];
             if (subId == 0) {
                 return IAdapter(adapter).estimatePaymentAmountInETH(
-                    callbackGasLimit, overhead, 0, tx.gasprice * 3, GROUP_SIZE
+                    callbackGasLimit, overhead, 0, tx.gasprice * 3, groupSize
                 );
             }
         }
@@ -118,7 +118,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
             tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
         }
         uint256 estimatedFee = IAdapter(adapter).estimatePaymentAmountInETH(
-            callbackGasLimit, overhead, tierFee, tx.gasprice * 3, GROUP_SIZE
+            callbackGasLimit, overhead, tierFee, tx.gasprice * 3, groupSize
         );
         return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
     }
@@ -190,6 +190,10 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
 
     function setTrialSubscription(uint64 _trialSubId) external onlyOwner {
         trialSubId = _trialSubId;
+    }
+
+    function setGroupSize(uint32 _groupSize) external onlyOwner {
+        groupSize = _groupSize;
     }
 
     function getTrialSubscription() external view returns (uint64) {
@@ -295,12 +299,14 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         }
     }
     
-    function _calculateFeeOverhead(PlayType playType, bytes memory params) internal pure returns (uint32 overhead) {
+    function _calculateFeeOverhead(PlayType playType, bytes memory params) internal view returns (uint32 overhead) {
+        (,,,uint32 gasExceptCallback,,,) = IAdapter(adapter).getAdapterConfig();
+        overhead = gasExceptCallback + RANDOMNESS_REWARD_GAS * groupSize;
         if (playType == PlayType.Draw) {
-            overhead = FEE_OVERHEAD * 4 / 3;
+            overhead = overhead * 4 / 3;
         } else if (playType == PlayType.Roll) {
             (uint32 bunch, ) = abi.decode(params, (uint32, uint32));
-            overhead = (FEE_OVERHEAD + bunch * FEE_OVERHEAD_FACTOR) * 4 / 3;
+            overhead = (overhead + bunch * FEE_OVERHEAD_FACTOR) * 4 / 3;
         }
     }
     /**
