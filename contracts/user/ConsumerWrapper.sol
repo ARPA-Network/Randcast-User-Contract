@@ -9,7 +9,6 @@ import {IRequestTypeBase} from "../interfaces/IRequestTypeBase.sol";
 // solhint-disable-next-line no-global-import
 
 contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, OwnableUpgradeable {
-    uint32 private constant _FEE_OVERHEAD = 700000;
     uint32 private constant _GROUP_SIZE = 3;
     uint32 private constant _RANDOMNESS_CALLBACK_GAS_BASE = 10000;
     uint32 private constant _RANDOMWORDS_CALLBACK_GAS_BASE = 36000;
@@ -17,7 +16,10 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
     uint32 private constant _SHUFFLE_CALLBACK_GAS_BASE = 36000;
     uint32 private constant _SHUFFLE_CALLBACK_UPPER_FACTOR = 700;
     uint32 private constant _FEE_OVERHEAD_FACTOR = 500;
-    bytes32 private constant _ADAPTER_SLOT = 0x360894a13aa1a3210667c824492db98dca3e2076cc3735a920a3ca505d382bbc;
+    uint32 private constant RANDOMNESS_REWARD_GAS = 9000;
+    
+    address private  adapter;
+    uint32 private groupSize = 5;
 
     struct RequestData {
         bytes32 entityId;
@@ -72,10 +74,12 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    function setAdapterAddress(address adpater) external onlyOwner {
-        assembly {
-            sstore(_ADAPTER_SLOT, adpater)
-        }
+    function setAdapter(address _adpater) external onlyOwner {
+        adapter = _adpater;
+    }
+
+    function setGroupSize(uint32 _groupSize) external onlyOwner {
+        groupSize = _groupSize;
     }
 
     function getRandomness(uint64 subId, bytes32 entityId, uint32 callbackGasLimit, address callbackAddress)
@@ -83,7 +87,7 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         payable
         returns (bytes32 requestId)
     {
-        (uint16 requestConfirmations, uint32 maxGasLimit,,,,,) = IAdapter(_adapterAddress()).getAdapterConfig();
+        (uint16 requestConfirmations, uint32 maxGasLimit,,,,,) = IAdapter(adapter).getAdapterConfig();
         if (callbackGasLimit > maxGasLimit) {
             revert GasLimitTooBig(callbackGasLimit, maxGasLimit);
         }
@@ -103,7 +107,7 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         uint32 callbackGasLimit,
         address callbackAddress
     ) external payable returns (bytes32 requestId) {
-        (uint16 requestConfirmations, uint32 maxGasLimit,,,,,) = IAdapter(_adapterAddress()).getAdapterConfig();
+        (uint16 requestConfirmations, uint32 maxGasLimit,,,,,) = IAdapter(adapter).getAdapterConfig();
         if (callbackGasLimit > maxGasLimit) {
             revert GasLimitTooBig(callbackGasLimit, maxGasLimit);
         }
@@ -123,7 +127,7 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         uint32 callbackGasLimit,
         address callbackAddress
     ) external payable returns (bytes32 requestId) {
-        (uint16 requestConfirmations, uint32 maxGasLimit,,,,,) = IAdapter(_adapterAddress()).getAdapterConfig();
+        (uint16 requestConfirmations, uint32 maxGasLimit,,,,,) = IAdapter(adapter).getAdapterConfig();
         if (callbackGasLimit > maxGasLimit) {
             revert GasLimitTooBig(callbackGasLimit, maxGasLimit);
         }
@@ -141,10 +145,24 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         if (subId == 0) {
             return;
         }
-        IAdapter(_adapterAddress()).cancelSubscription(subId, msg.sender);
+        IAdapter(adapter).cancelSubscription(subId, msg.sender);
         delete userSubIds[msg.sender];
     }
+    function rawFulfillRandomness(bytes32 requestId, uint256 randomness) external {
+        require(msg.sender == adapter, "Only adapter can fulfill");
+        _fulfillRandomness(requestId, randomness);
+    }
 
+    function rawFulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) external {
+        require(msg.sender == adapter, "Only adapter can fulfill");
+        _fulfillRandomWords(requestId, randomWords);
+    }
+
+    function rawFulfillShuffledArray(bytes32 requestId, uint256[] memory shuffledArray) external {
+        require(msg.sender == adapter, "Only adapter can fulfill");
+        _fulfillShuffledArray(requestId, shuffledArray);
+    }
+    
     function estimateFee(RequestType requestType, uint64 subId, bytes memory params, uint32 callbackGasLimit)
         public
         view
@@ -155,7 +173,7 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         if (subId == 0) {
             subId = userSubIds[msg.sender];
             if (subId == 0) {
-                return IAdapter(_adapterAddress()).estimatePaymentAmountInETH(
+                return IAdapter(adapter).estimatePaymentAmountInETH(
                     totalGasLimit, overhead, 0, tx.gasprice * 3, _GROUP_SIZE
                 );
             }
@@ -166,7 +184,7 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         if (sub.freeRequestCount == 0) {
             tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
         }
-        uint256 estimatedFee = IAdapter(_adapterAddress()).estimatePaymentAmountInETH(
+        uint256 estimatedFee = IAdapter(adapter).estimatePaymentAmountInETH(
             totalGasLimit, overhead, tierFee, tx.gasprice * 3, _GROUP_SIZE
         );
         return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
@@ -180,12 +198,6 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         return _getSubscription(subId);
     }
 
-    function _adapterAddress() internal view returns (address r) {
-        assembly {
-            r := sload(_ADAPTER_SLOT)
-        }
-    }
-
     function _fundSubId(RequestType requestType, uint64 subId, bytes memory params, uint32 callbackGasLimit)
         internal
         returns (uint64)
@@ -193,8 +205,8 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         if (subId == 0) {
             subId = userSubIds[msg.sender];
             if (subId == 0) {
-                subId = IAdapter(_adapterAddress()).createSubscription();
-                IAdapter(_adapterAddress()).addConsumer(subId, address(this));
+                subId = IAdapter(adapter).createSubscription();
+                IAdapter(adapter).addConsumer(subId, address(this));
                 userSubIds[msg.sender] = subId;
             }
         }
@@ -205,7 +217,7 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
         if (requiredAmount == 0) {
             return subId;
         }
-        IAdapter(_adapterAddress()).fundSubscription{value: msg.value}(subId);
+        IAdapter(adapter).fundSubscription{value: msg.value}(subId);
         return subId;
     }
 
@@ -220,14 +232,14 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
             ,
             sub.reqCountInCurrentPeriod,
             sub.lastRequestTimestamp
-        ) = IAdapter(_adapterAddress()).getSubscription(subId);
+        ) = IAdapter(adapter).getSubscription(subId);
     }
 
     function _getFlatFeeConfig() internal view returns (FeeConfig memory feeConfig) {
         {
             (, bytes memory point) =
             // solhint-disable-next-line avoid-low-level-calls
-             address(_adapterAddress()).staticcall(abi.encodeWithSelector(IAdapter.getFlatFeeConfig.selector));
+             address(adapter).staticcall(abi.encodeWithSelector(IAdapter.getFlatFeeConfig.selector));
             uint16 flatFeePromotionGlobalPercentage;
             bool isFlatFeePromotionEnabledPermanently;
             uint256 flatFeePromotionStartTimestamp;
@@ -271,7 +283,7 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
                 reqCountCalc = reqCountInCurrentPeriod + 1;
             }
         }
-        return IAdapter(_adapterAddress()).getFeeTier(reqCountCalc) * feeConfig.flatFeePromotionGlobalPercentage / 100;
+        return IAdapter(adapter).getFeeTier(reqCountCalc) * feeConfig.flatFeePromotionGlobalPercentage / 100;
     }
 
     function _calculateGasLimit(RequestType requestType, bytes memory params) internal pure returns (uint32 gasLimit) {
@@ -288,17 +300,19 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
 
     function _calculateFeeOverhead(RequestType requestType, bytes memory params)
         internal
-        pure
+        view
         returns (uint32 overhead)
     {
+        (,,,uint32 gasExceptCallback,,,) = IAdapter(adapter).getAdapterConfig();
+        overhead = gasExceptCallback + RANDOMNESS_REWARD_GAS * groupSize;
         if (requestType == RequestType.Randomness) {
-            overhead = _FEE_OVERHEAD;
+            overhead = overhead * 4 / 3;
         } else if (requestType == RequestType.RandomWords) {
             uint32 size = abi.decode(params, (uint32));
-            overhead = (_FEE_OVERHEAD + size * _FEE_OVERHEAD_FACTOR);
+            overhead = (overhead + size * _FEE_OVERHEAD_FACTOR) * 4 / 3;
         } else if (requestType == RequestType.Shuffling) {
             uint32 upper = abi.decode(params, (uint32));
-            overhead = (_FEE_OVERHEAD + upper * _FEE_OVERHEAD_FACTOR);
+            overhead = (overhead + upper * _FEE_OVERHEAD_FACTOR) * 4 / 3;
         }
     }
 
@@ -354,22 +368,7 @@ contract ConsumerWrapper is RequestIdBase, IRequestTypeBase, UUPSUpgradeable, Ow
             requestType, params, subId, seed, requestConfirmations, callbackGasLimit, callbackMaxGasPrice
         );
 
-        return IAdapter(_adapterAddress()).requestRandomness(p);
-    }
-
-    function rawFulfillRandomness(bytes32 requestId, uint256 randomness) external {
-        require(msg.sender == _adapterAddress(), "Only adapter can fulfill");
-        _fulfillRandomness(requestId, randomness);
-    }
-
-    function rawFulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) external {
-        require(msg.sender == _adapterAddress(), "Only adapter can fulfill");
-        _fulfillRandomWords(requestId, randomWords);
-    }
-
-    function rawFulfillShuffledArray(bytes32 requestId, uint256[] memory shuffledArray) external {
-        require(msg.sender == _adapterAddress(), "Only adapter can fulfill");
-        _fulfillShuffledArray(requestId, shuffledArray);
+        return IAdapter(adapter).requestRandomness(p);
     }
 
     /**

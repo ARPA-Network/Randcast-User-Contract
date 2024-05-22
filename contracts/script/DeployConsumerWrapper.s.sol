@@ -20,7 +20,6 @@ contract DeployConsumerWrapperScript is Script {
         bytes32 implSalt = keccak256(abi.encode("ComsumerWrapper"));
         // Deploy the ConsumerWrapper contract using Create2
         ConsumerWrapper consumerImpl = new ConsumerWrapper{salt: implSalt}();
-        // comsumerImpl.setAdapterAddress(_adapterAddress);
         console.log(address(consumerImpl));
 
         // Compute a new unique salt for the ERC1967Proxy contract
@@ -32,7 +31,7 @@ contract DeployConsumerWrapperScript is Script {
         console.log(address(porxy));
         address(porxy).call(abi.encodeWithSignature("initialize()"));
         address(porxy).call(abi.encodeWithSignature("disableInitializers()"));
-        address(porxy).call(abi.encodeWithSignature("setAdapterAddress(address)", _adapterAddress));
+        address(porxy).call(abi.encodeWithSignature("setAdapter(address)", _adapterAddress));
         vm.stopBroadcast();
     }
 }
