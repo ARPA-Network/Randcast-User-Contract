@@ -9,12 +9,7 @@ import {Ownable} from "../utils/Ownable.sol";
 /**
  * @notice This provides callbackGaslimit auto-calculating and TODO balance checking to save user's effort.
  */
-abstract contract GeneralRandcastConsumerBase is
-    BasicRandcastConsumerBase,
-    RequestIdBase,
-    GasEstimationBase,
-    Ownable
-{
+abstract contract GeneralRandcastConsumerBase is BasicRandcastConsumerBase, RequestIdBase, GasEstimationBase, Ownable {
     // Sets user seed as 0 to so that users don't have to pass it.
     uint256 private constant _USER_SEED_PLACEHOLDER = 0;
     // TODO Gives a fixed buffer so that some logic differ in the callback slightly raising gas used will be supported.
@@ -59,6 +54,8 @@ abstract contract GeneralRandcastConsumerBase is
         // Only in the first place we calculate the callbackGasLimit, then next time we directly use it to request randomness.
         if (callbackGasLimit == 0) {
             uint256 gasUsed = _dryRunCallbackToEstimateGas(requestType, params, subId);
+            // casting to 'uint32' is safe because the gasUsed is always less than the MAX_GAS_LIMIT
+            // forge-lint: disable-next-line(unsafe-typecast)
             callbackGasLimit = uint32(gasUsed) + _GAS_FOR_CALLBACK_OVERHEAD;
         }
         if (requestConfirmations == 0) {
@@ -114,9 +111,11 @@ abstract contract GeneralRandcastConsumerBase is
 
         // We don't want message call for estimating gas to take effect, therefore success should be false,
         // and result should be the reverted reason, which in fact is gas used we encoded to string.
-        (bool success, bytes memory result) =
-        // solhint-disable-next-line avoid-low-level-calls
-         address(this).call(abi.encodeWithSelector(this.requiredTxGas.selector, address(this), 0, data));
+        (
+            bool success,
+            bytes memory result
+            // solhint-disable-next-line avoid-low-level-calls
+        ) = address(this).call(abi.encodeWithSelector(this.requiredTxGas.selector, address(this), 0, data));
 
         // This will be 0 if message call for callback fails,
         // we pass this message to tell user that callback implementation need to be checked.

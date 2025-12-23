@@ -35,6 +35,19 @@ function shuffle(uint256 upper, uint256 randomness) pure returns (uint256[] memo
  * @return chosenIndices Returns the selected indices as an array.
  */
 function draw(uint256 seed, uint256[] memory indices, uint256 count) pure returns (uint256[] memory) {
+    return drawWithOffset(seed, indices, count, 0);
+}
+
+function drawWithOffset(uint256 seed, uint256[] memory indices, uint256 count, uint256 offset)
+    pure
+    returns (uint256[] memory)
+{
+    require(offset <= 1, "Offset must be less than or equal to 1");
+    require(count <= indices.length, "Count cannot exceed indices length");
+    if (count == 0) {
+        return new uint256[](0);
+    }
+
     uint256[] memory chosenIndices = new uint256[](count);
 
     // Create copy of indices to avoid modifying original array.
@@ -46,7 +59,7 @@ function draw(uint256 seed, uint256[] memory indices, uint256 count) pure return
     uint256 remainingCount = remainingIndices.length;
     for (uint256 i = 0; i < count; i++) {
         uint256 index = uint256(keccak256(abi.encodePacked(seed, i))) % remainingCount;
-        chosenIndices[i] = remainingIndices[index];
+        chosenIndices[i] = remainingIndices[index] + offset;
         remainingIndices[index] = remainingIndices[remainingCount - 1];
         remainingCount--;
     }
@@ -71,24 +84,28 @@ function roll(uint256 randomness, uint256 size) pure returns (uint256 number) {
  */
 function pickByWeights(uint256 randomness, uint256[] memory valueWeights) pure returns (uint256 chosenIndex) {
     uint256 weightsLen = valueWeights.length;
-    // Create copy of weights to avoid modifying original array.
-    uint256[] memory weights = new uint256[](weightsLen);
-    for (uint256 i = 0; i < weightsLen; i++) {
-        weights[i] = valueWeights[i];
-    }
+    require(weightsLen > 0, "Weights array cannot be empty");
+
+    // calculate total weight
     uint256 sum = 0;
-    if (weightsLen > 1) {
-        for (uint256 i = 1; i < weightsLen; ++i) {
-            weights[i] = weights[i] + weights[i - 1];
-        }
+    for (uint256 i = 0; i < weightsLen; i++) {
+        sum += valueWeights[i];
     }
-    sum = weights[weightsLen - 1];
-    uint256 weightValue = randomness % (sum + 1);
-    for (uint256 i = 0; i < weightsLen; ++i) {
-        if (weightValue <= weights[i]) {
+    require(sum > 0, "Total weight must be greater than 0");
+
+    uint256 weightValue = randomness % sum;
+
+    // build cumulative sum and find the index
+    uint256 cumulative = 0;
+    for (uint256 i = 0; i < weightsLen; i++) {
+        cumulative += valueWeights[i];
+        if (weightValue < cumulative) {
             return i;
         }
     }
+
+    // theoretically should not reach here, but for safety
+    return weightsLen - 1;
 }
 
 /**

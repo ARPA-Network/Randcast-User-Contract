@@ -4,7 +4,8 @@ pragma solidity ^0.8.18;
 interface ISharedConsumer {
     enum PlayType {
         Draw,
-        Roll
+        Roll,
+        Gacha
     }
 
     function estimateFee(PlayType playType, uint64 subId, bytes memory params)
@@ -12,17 +13,32 @@ interface ISharedConsumer {
         view
         returns (uint256 requestFee);
 
-    function rollDice(uint32 bunch, uint32 size, uint64 subId, uint256 seed, uint16 requestConfirmations)
-        external
-        payable
-        returns (bytes32 requestId);
+    function gacha(
+        uint32 count,
+        uint256[] memory weights,
+        uint256[] memory upperLimits,
+        uint64 subId,
+        uint256 seed,
+        uint16 requestConfirmations,
+        bytes calldata message
+    ) external payable returns (bytes32 requestId);
+
+    function rollDice(
+        uint32 bunch,
+        uint32 size,
+        uint64 subId,
+        uint256 seed,
+        uint16 requestConfirmations,
+        bytes calldata message
+    ) external payable returns (bytes32 requestId);
 
     function drawTickets(
         uint32 totalNumber,
         uint32 winnerNumber,
         uint64 subId,
         uint256 seed,
-        uint16 requestConfirmations
+        uint16 requestConfirmations,
+        bytes calldata message
     ) external payable returns (bytes32 requestId);
 
     function cancelSubscription() external;

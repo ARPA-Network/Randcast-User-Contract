@@ -10,7 +10,6 @@ import {IAdapter} from "../interfaces/IAdapter.sol";
 import "./RandcastSDK.sol" as RandcastSDK;
 
 contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgradeable, OwnableUpgradeable {
-
     uint32 private constant DRAW_CALLBACK_GAS_BASE = 40000;
     uint32 private constant ROLL_CALLBACK_GAS_BASE = 36000;
     uint32 private constant DRAW_CALLBACK_TOTAL_FACTOR = 371;
@@ -51,9 +50,20 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
 
     enum PlayType {
         Draw,
-        Roll
+        Roll,
+        Gacha
     }
 
+    /// @notice Emitted when a roll dice randomness request is made
+    /// @param user The address of the user making the request
+    /// @param subId The subscription ID of the user making the request
+    /// @param requestId The request ID of the request
+    /// @param bunch The count of rolls
+    /// @param size The size of each roll
+    /// @param paidAmount The amount of ETH paid for the request
+    /// @param seed The seed for the request
+    /// @param requestConfirmations The number of confirmations for the request
+    /// @param message The message for the request, usually the merkle root of the draw list
     event RollDiceRequest(
         address indexed user,
         uint64 indexed subId,
@@ -62,9 +72,11 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         uint32 size,
         uint256 paidAmount,
         uint256 seed,
-        uint16 requestConfirmations
+        uint16 requestConfirmations,
+        bytes message
     );
 
+    /// @notice Emitted when a draw tickets randomness request is made
     event DrawTicketsRequest(
         address indexed user,
         uint64 indexed subId,
@@ -73,13 +85,35 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         uint32 winnerNumber,
         uint256 paidAmount,
         uint256 seed,
-        uint16 requestConfirmations
+        uint16 requestConfirmations,
+        bytes message
     );
 
+    /// @notice Emitted when a gacha request is made
+    event GachaRequest(
+        address indexed user,
+        uint64 indexed subId,
+        bytes32 indexed requestId,
+        uint32 count,
+        uint256[] weights,
+        uint256[] upperLimits,
+        uint256 paidAmount,
+        uint256 seed,
+        uint16 requestConfirmations,
+        bytes message
+    );
+
+    /// @notice Emitted when a roll dice result is generated
     event RollDiceResult(bytes32 indexed requestId, uint256[] result);
+
+    /// @notice Emitted when a draw tickets result is generated
     event DrawTicketsResult(bytes32 indexed requestId, uint256[] result);
 
+    /// @notice Emitted when a gacha result is generated
+    event GachaResult(bytes32 indexed requestId, uint256[] weightResults, uint256[] indexResults);
+
     error InvalidParameters();
+    error InvalidRequestData();
     error InsufficientFund(uint256 fundAmount, uint256 requiredAmount);
     error InvalidSubId();
     error GasLimitTooBig(uint256 have, uint32 want);
@@ -106,9 +140,8 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         if (subId == 0) {
             subId = userSubIds[msg.sender];
             if (subId == 0) {
-                return IAdapter(adapter).estimatePaymentAmountInETH(
-                    callbackGasLimit, overhead, 0, tx.gasprice * 3, GROUP_SIZE
-                );
+                return IAdapter(adapter)
+                    .estimatePaymentAmountInETH(callbackGasLimit, overhead, 0, tx.gasprice * 3, GROUP_SIZE);
             }
         }
         // Get subscription details only if subId is not zero
@@ -117,17 +150,54 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         if (sub.freeRequestCount == 0) {
             tierFee = _calculateTierFee(sub.reqCount, sub.lastRequestTimestamp, sub.reqCountInCurrentPeriod);
         }
-        uint256 estimatedFee = IAdapter(adapter).estimatePaymentAmountInETH(
-            callbackGasLimit, overhead, tierFee, tx.gasprice * 3, GROUP_SIZE
-        );
+        uint256 estimatedFee = IAdapter(adapter)
+            .estimatePaymentAmountInETH(callbackGasLimit, overhead, tierFee, tx.gasprice * 3, GROUP_SIZE);
         return estimatedFee > (sub.balance - sub.inflightCost) ? estimatedFee - (sub.balance - sub.inflightCost) : 0;
     }
 
-    function rollDice(uint32 bunch, uint32 size, uint64 subId, uint256 seed, uint16 requestConfirmations)
-        external
-        payable
-        returns (bytes32 requestId)
-    {
+    function gacha(
+        uint32 count,
+        uint256[] memory weights,
+        uint256[] memory upperLimits,
+        uint64 subId,
+        uint256 seed,
+        uint16 requestConfirmations,
+        bytes calldata message
+    ) external payable returns (bytes32 requestId) {
+        if (
+            count > 100 || count == 0 || weights.length == 0 || upperLimits.length == 0
+                || weights.length != upperLimits.length
+        ) {
+            revert InvalidParameters();
+        }
+        bytes memory requestParams = abi.encode(count, weights, upperLimits);
+        uint32 gasLimit = _calculateGasLimit(PlayType.Gacha, requestParams);
+        if (gasLimit > MAX_GAS_LIMIT) {
+            revert GasLimitTooBig(gasLimit, MAX_GAS_LIMIT);
+        }
+        if (requestConfirmations == 0) {
+            (requestConfirmations,,,,,,) = IAdapter(adapter).getAdapterConfig();
+        }
+        subId = _fundSubId(PlayType.Gacha, subId, requestParams);
+        bytes memory params;
+        params = abi.encode(count, weights, upperLimits);
+        requestId = _rawRequestRandomness(
+            RequestType.RandomWords, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
+        );
+        pendingRequests[requestId] = RequestData(PlayType.Gacha, requestParams);
+        emit GachaRequest(
+            msg.sender, subId, requestId, count, weights, upperLimits, msg.value, seed, requestConfirmations, message
+        );
+    }
+
+    function rollDice(
+        uint32 bunch,
+        uint32 size,
+        uint64 subId,
+        uint256 seed,
+        uint16 requestConfirmations,
+        bytes calldata message
+    ) external payable returns (bytes32 requestId) {
         if (bunch > 100 || bunch == 0 || size == 0) {
             revert InvalidParameters();
         }
@@ -146,7 +216,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
             RequestType.RandomWords, params, subId, seed, requestConfirmations, gasLimit, tx.gasprice * 3
         );
         pendingRequests[requestId] = RequestData(PlayType.Roll, requestParams);
-        emit RollDiceRequest(msg.sender, subId, requestId, bunch, size, msg.value, seed, requestConfirmations);
+        emit RollDiceRequest(msg.sender, subId, requestId, bunch, size, msg.value, seed, requestConfirmations, message);
     }
 
     function drawTickets(
@@ -154,7 +224,8 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         uint32 winnerNumber,
         uint64 subId,
         uint256 seed,
-        uint16 requestConfirmations
+        uint16 requestConfirmations,
+        bytes calldata message
     ) external payable returns (bytes32 requestId) {
         if (totalNumber > 1000 || totalNumber < winnerNumber || totalNumber == 0 || winnerNumber == 0) {
             revert InvalidParameters();
@@ -175,7 +246,7 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         );
         pendingRequests[requestId] = RequestData(PlayType.Draw, requestParams);
         emit DrawTicketsRequest(
-            msg.sender, subId, requestId, totalNumber, winnerNumber, msg.value, seed, requestConfirmations
+            msg.sender, subId, requestId, totalNumber, winnerNumber, msg.value, seed, requestConfirmations, message
         );
     }
 
@@ -221,23 +292,25 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
 
     function _getSubscription(uint64 subId) internal view returns (Subscription memory sub) {
         (
-            ,
-            ,
-            sub.balance,
-            sub.inflightCost,
-            sub.reqCount,
-            sub.freeRequestCount,
-            ,
-            sub.reqCountInCurrentPeriod,
-            sub.lastRequestTimestamp
-        ) = IAdapter(adapter).getSubscription(subId);
+                ,
+                ,
+                sub.balance,
+                sub.inflightCost,
+                sub.reqCount,
+                sub.freeRequestCount,
+                ,
+                sub.reqCountInCurrentPeriod,
+                sub.lastRequestTimestamp
+            ) = IAdapter(adapter).getSubscription(subId);
     }
 
     function _getFlatFeeConfig() internal view returns (FeeConfig memory feeConfig) {
         {
-            (, bytes memory point) =
-            // solhint-disable-next-line avoid-low-level-calls
-             address(adapter).staticcall(abi.encodeWithSelector(IAdapter.getFlatFeeConfig.selector));
+            (
+                ,
+                bytes memory point
+                // solhint-disable-next-line avoid-low-level-calls
+            ) = address(adapter).staticcall(abi.encodeWithSelector(IAdapter.getFlatFeeConfig.selector));
             uint16 flatFeePromotionGlobalPercentage;
             bool isFlatFeePromotionEnabledPermanently;
             uint256 flatFeePromotionStartTimestamp;
@@ -269,11 +342,11 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
         if (feeConfig.isFlatFeePromotionEnabledPermanently) {
             reqCountCalc = reqCount;
         } else if (
-            feeConfig
+            feeConfig.
+                    //solhint-disable-next-line not-rely-on-time
+                    flatFeePromotionStartTimestamp <= block.timestamp
                 //solhint-disable-next-line not-rely-on-time
-                .flatFeePromotionStartTimestamp <= block.timestamp
-            //solhint-disable-next-line not-rely-on-time
-            && block.timestamp <= feeConfig.flatFeePromotionEndTimestamp
+                && block.timestamp <= feeConfig.flatFeePromotionEndTimestamp
         ) {
             if (lastRequestTimestamp < feeConfig.flatFeePromotionStartTimestamp) {
                 reqCountCalc = 1;
@@ -287,27 +360,40 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
     function _calculateGasLimit(PlayType playType, bytes memory params) internal pure returns (uint32 gasLimit) {
         if (playType == PlayType.Draw) {
             (uint32 totalNumber, uint32 winnerNumber) = abi.decode(params, (uint32, uint32));
-            gasLimit = (DRAW_CALLBACK_GAS_BASE + totalNumber *
-                DRAW_CALLBACK_TOTAL_FACTOR + winnerNumber * DRAW_CALLBACK_WINNER_FACTOR) * 4 / 3;
+            gasLimit = (DRAW_CALLBACK_GAS_BASE
+                    + totalNumber
+                    * DRAW_CALLBACK_TOTAL_FACTOR
+                    + winnerNumber
+                    * DRAW_CALLBACK_WINNER_FACTOR) * 4 / 3;
         } else if (playType == PlayType.Roll) {
             (uint32 bunch,) = abi.decode(params, (uint32, uint32));
             gasLimit = (ROLL_CALLBACK_GAS_BASE + bunch * ROLL_CALLBACK_BUNCH_FACTOR) * 4 / 3;
+        } else if (playType == PlayType.Gacha) {
+            gasLimit = MAX_GAS_LIMIT;
         }
     }
-    
+
     function _calculateFeeOverhead(PlayType playType, bytes memory params) internal pure returns (uint32 overhead) {
         if (playType == PlayType.Draw) {
             overhead = FEE_OVERHEAD * 4 / 3;
         } else if (playType == PlayType.Roll) {
-            (uint32 bunch, ) = abi.decode(params, (uint32, uint32));
+            (uint32 bunch,) = abi.decode(params, (uint32, uint32));
             overhead = (FEE_OVERHEAD + bunch * FEE_OVERHEAD_FACTOR) * 4 / 3;
+        } else if (playType == PlayType.Gacha) {
+            (uint32 count,,) = abi.decode(params, (uint32, uint32[], uint32[]));
+            overhead = (FEE_OVERHEAD + count * FEE_OVERHEAD_FACTOR) * 4 / 3;
         }
     }
+
     /**
      * Callback function used by Randcast Adapter to generate a sets of dice result
      */
     function _fulfillRandomWords(bytes32 requestId, uint256[] memory randomWords) internal override {
         RequestData memory requestData = pendingRequests[requestId];
+        // revert if requestData is empty
+        if (requestData.param.length == 0) {
+            revert InvalidRequestData();
+        }
         if (requestData.playType == PlayType.Roll) {
             (uint32 bunch, uint32 size) = abi.decode(requestData.param, (uint32, uint32));
             uint256[] memory diceResults = new uint256[](bunch);
@@ -316,6 +402,18 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
             }
             delete pendingRequests[requestId];
             emit RollDiceResult(requestId, diceResults);
+        } else if (requestData.playType == PlayType.Gacha) {
+            (uint32 count, uint256[] memory weights, uint256[] memory upperLimits) =
+                abi.decode(requestData.param, (uint32, uint256[], uint256[]));
+            uint256[] memory weightResults = new uint256[](count);
+            uint256[] memory indexResults = new uint256[](count);
+            for (uint32 i = 0; i < count; i++) {
+                weightResults[i] = RandcastSDK.pickByWeights(randomWords[i], weights);
+                indexResults[i] =
+                    RandcastSDK.roll(uint256(keccak256(abi.encode(randomWords[i]))), upperLimits[weightResults[i]]) + 1;
+            }
+            delete pendingRequests[requestId];
+            emit GachaResult(requestId, weightResults, indexResults);
         }
     }
 
@@ -325,13 +423,17 @@ contract SharedConsumer is RequestIdBase, BasicRandcastConsumerBase, UUPSUpgrade
 
     function _fulfillRandomness(bytes32 requestId, uint256 randomness) internal override {
         RequestData memory requestData = pendingRequests[requestId];
+        // revert if requestData is empty
+        if (requestData.param.length == 0) {
+            revert InvalidRequestData();
+        }
         if (requestData.playType == PlayType.Draw) {
             (uint32 totalNumber, uint32 winnerNumber) = abi.decode(requestData.param, (uint32, uint32));
             uint256[] memory tickets = new uint256[](totalNumber);
             for (uint32 i = 0; i < totalNumber; i++) {
                 tickets[i] = i;
             }
-            uint256[] memory winnerResults = RandcastSDK.draw(randomness, tickets, winnerNumber);
+            uint256[] memory winnerResults = RandcastSDK.drawWithOffset(randomness, tickets, winnerNumber, 1);
             delete pendingRequests[requestId];
             emit DrawTicketsResult(requestId, winnerResults);
         }

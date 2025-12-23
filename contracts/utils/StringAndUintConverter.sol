@@ -8,6 +8,8 @@ function uintToString(uint256 v) pure returns (string memory str) {
     while (v != 0) {
         uint256 remainder = v % 10;
         v = v / 10;
+        // casting to 'uint8' is safe because the remainder is always less than 10
+        // forge-lint: disable-next-line(unsafe-typecast)
         reversed[i++] = bytes1(uint8(48 + remainder));
     }
     bytes memory s = new bytes(i + 1);
