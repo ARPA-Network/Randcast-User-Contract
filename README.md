@@ -62,6 +62,11 @@ The Playground serves as:
 ### For Developers (Custom Integration)
 
 1. **Study the Contract**: Review `SharedConsumer.sol` as a reference implementation
+
+```bash
+forge install ARPA-Network/Randcast-User-Contract
+```
+
 2. **Understand Patterns**: Learn how to:
    - Integrate with `BasicRandcastConsumerBase`
    - Implement `_fulfillRandomWords` and `_fulfillRandomness` callbacks
