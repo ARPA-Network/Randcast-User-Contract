@@ -1,8 +1,8 @@
-# SharedConsumer: A Production-Ready Randomness Consumer Contract for Lottery and Gaming Demonstrations
+# SharedConsumer: An Out-of-the-Box Randomness Consumer Contract for Lottery and Gaming Demonstrations
 
 ## Overview
 
-`SharedConsumer` is a comprehensive, production-ready smart contract built on top of Randcast that provides out-of-the-box randomness solutions for various lottery and gaming scenarios. It serves as both a practical tool for communities seeking immediate randomness functionality and a reference implementation for developers looking to integrate Randcast into their projects.
+`SharedConsumer` is a comprehensive, out-of-the-box smart contract built on top of Randcast that provides ready-to-use randomness solutions for various lottery and gaming scenarios. It serves as both a practical tool for communities seeking immediate randomness functionality and a reference implementation for developers looking to integrate Randcast into their projects.
 
 The contract has been deployed across multiple major blockchain networks as part of the **Randcast Playground**, demonstrating its reliability and versatility in real-world applications.
 
@@ -44,9 +44,9 @@ The `SharedConsumer` contract has been deployed as part of the **Randcast Playgr
 
 The Playground serves as:
 
-1. **Production Environment**: Real-world testing and usage by communities
+1. **Live Deployment**: Real-world testing and usage by communities across multiple networks
 2. **Reference Implementation**: Code examples and integration patterns
-3. **Cost Demonstration**: Showcasing the efficiency of Randcast's free response model
+3. **Cost Demonstration**: Showcasing the efficiency of Randcast's subscription model
 
 ## Integration Guide
 
@@ -272,10 +272,22 @@ All events include `requestId` for easy tracking and correlation.
 - **Roll Dice**: Maximum 100 rolls per request
 - **Gacha**: Maximum 100 items per draw, weights and upperLimits arrays must match length
 
+## Disclaimer
+
+**Important**: While `SharedConsumer` is designed to be functional and has been tested in various scenarios, **users are strongly advised to conduct their own research (DYOR) before deploying or using this contract in production environments**.
+
+- This contract is provided as-is without warranties of any kind
+- Users should review the code, understand the risks, and assess suitability for their specific use case
+- The contract authors and maintainers are not responsible for any losses or damages resulting from the use of this contract
+- Always audit smart contracts before deploying to mainnet with significant value
+- Test thoroughly in testnet environments before production use
+
 ## Conclusion
 
-`SharedConsumer` represents a production-ready solution for randomness needs in Web3 applications. Whether you're a community looking for immediate lottery functionality or a developer seeking integration patterns, `SharedConsumer` provides a robust foundation built on Randcast's decentralized randomness infrastructure.
+`SharedConsumer` represents an out-of-the-box solution for randomness needs in Web3 applications. Whether you're a community looking for immediate lottery functionality or a developer seeking integration patterns, `SharedConsumer` provides a robust foundation built on Randcast's decentralized randomness infrastructure.
 
 The contract's deployment across multiple networks in the Randcast Playground demonstrates its reliability and versatility, while its free response callbacks from trial subscription make it economically viable for lottery and gaming demonstrations.
+
+**Remember**: Always conduct your own research and security audits before deploying to production environments with significant value.
 
 For more information, code examples, and deployment addresses, visit the [Randcast Documentation](https://docs.arpanetwork.io/) and [Randcast Playground](https://www.arpanetwork.io/play).
