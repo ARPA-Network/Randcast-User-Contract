@@ -4,7 +4,7 @@
 
 `SharedConsumer` is a comprehensive, out-of-the-box smart contract built on top of Randcast that provides ready-to-use randomness solutions for various lottery and gaming scenarios. It serves as both a practical tool for communities seeking immediate randomness functionality and a reference implementation for developers looking to integrate Randcast into their projects.
 
-The contract has been deployed across multiple major blockchain networks as part of the **Randcast Playground**, demonstrating its reliability and versatility in real-world applications.
+The contract has been deployed across multiple major blockchain networks as part of the [**Randcast Playground**](https://www.arpanetwork.io/play), demonstrating its reliability and versatility in real-world applications.
 
 ## Key Features
 
@@ -32,7 +32,7 @@ As a demonstration project, `SharedConsumer` showcases best practices for:
 
 ## Deployment Status
 
-The `SharedConsumer` contract has been deployed as part of the **Randcast Playground** on multiple major blockchain networks, including:
+The `SharedConsumer` contract has been deployed as part of the [**Randcast Playground**](https://www.arpanetwork.io/play) on multiple major blockchain networks, including:
 
 - **Ethereum Mainnet**(https://etherscan.io/address/0x8acfc64bF976488E9B83c517D4185Fd4D8A9D683)
 - **BSC Mainnet**(https://bscscan.com/address/0x9a599D28907780289bB980ddFA38A17B1176FC29)
